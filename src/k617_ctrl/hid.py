@@ -89,27 +89,85 @@ def _kind(frame: bytes) -> str:
     return frame_kind(frame)
 
 
-# known-good RGB sequence using the captured static-effect template
+# known-good RGB sequence (from orignalbox/k617-rgb working reference)
 def rgb_sequence(led_colors: dict[int, tuple[int, int, int]]) -> list[bytes]:
-    """Build the 5-frame RGB-write sequence for the given per-key colors.
+    """Build the RGB-write payloads: [INIT, P1(no SEC yet), P2, EXEC].
 
     led_colors maps LED index -> (r, g, b). Led indices live in
     protocol.LED_INDEX.
 
     NOTE: the EXEC frame commits to flash (5AA5 magic). Do not loop this.
     """
-    from .protocol import FRAME_CANVAS, NAME_TO_INDEX, base_frames, set_key_color
+    from .blobs import RGB_EXEC, RGB_INIT, RGB_SEC
+    from .protocol import NAME_TO_INDEX, RESTORE_CONSTANT_FRAMES, set_key_color
 
-    frames = [bytearray(f) for f in base_frames()]
-    canvas = frames[FRAME_CANVAS]
+    canvas = bytearray(1032)
+    canvas[0:5] = bytes.fromhex("0609bc0040")
     for idx, rgb in led_colors.items():
         if isinstance(idx, str):
             idx = NAME_TO_INDEX[idx]
         set_key_color(canvas, idx, rgb)
-    return [bytes(f) for f in frames]
+    canvas[660:660 + len(RGB_SEC)] = RGB_SEC
+    p2 = RESTORE_CONSTANT_FRAMES[2]  # routing, never modify
+    return [bytes(RGB_INIT), bytes(canvas), p2, RGB_EXEC]
 
 
 def rgb_all(color: tuple[int, int, int]) -> list[bytes]:
     from .protocol import LED_INDEX
 
     return rgb_sequence({idx: color for idx in LED_INDEX})
+
+
+def send_rgb(dev: K617, frames: list[bytes]) -> None:
+    """Send the RGB sequence WITH the mandatory GET_REPORT handshake.
+
+    Protocol: INIT -> GET (handshake) -> P1 -> P2 -> EXEC.
+    Without the handshake the firmware silently ignores the writes.
+    """
+    from time import sleep
+
+    init, canvas, p2, exec_ = frames
+    dev.send_feature(init)
+    print("  [1/4] INIT")
+    sleep(0.06)
+    resp = dev.get_feature(0x06, 1032)  # mandatory handshake
+    print(f"  [handshake] get_feature(0x06, 1032) -> {len(resp)}B")
+    sleep(0.06)
+    dev.send_feature(canvas)
+    print("  [2/4] CANVAS")
+    sleep(0.06)
+    dev.send_feature(p2)
+    print("  [3/4] ROUTING")
+    sleep(0.06)
+    dev.send_feature(exec_)
+    print("  [4/4] EXEC")
+
+
+# firmware effects + per-key paint (see k617_ctrl.effects)
+def send_firmware_effect(dev: K617, frames: list[bytes]) -> None:
+    """Send the 5-frame firmware-effect burst WITH the mandatory handshake.
+
+    Protocol: INIT -> GET (handshake) -> MODE -> CANVAS -> ROUTING -> EXEC.
+    The EXEC block commits the effect selection to flash (5AA5 magic).
+    """
+    from time import sleep
+
+    init, *blocks = frames
+    dev.send_feature(init)
+    print("  [1/5] INIT")
+    sleep(0.06)
+    resp = dev.get_feature(0x06, 1032)  # mandatory handshake
+    print(f"  [handshake] get_feature(0x06, 1032) -> {len(resp)}B")
+    sleep(0.06)
+    for i, block in enumerate(blocks, start=2):
+        dev.send_feature(block)
+        print(f"  [{i}/5] {_kind(block)}")
+        sleep(0.06)
+
+
+def send_per_key(dev: K617, frame: bytes) -> None:
+    """Send a single 382-byte per-key report (no handshake needed)."""
+    if dev.dry_run:
+        print(f"[dry-run] send_per_key({len(frame)}B): {frame[:16].hex(' ')}...")
+        return
+    dev._dev.send_feature_report(frame)

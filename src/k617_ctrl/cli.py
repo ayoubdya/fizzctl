@@ -1,35 +1,30 @@
-"""k617-ctrl — Linux tooling for the Redragon K617 Fizz.
-
-Reverse-engineering workspace + reference controllers for the keyboard's
-vendor interface. Everything is built on the previously reverse-engineered
-feature-report protocol (see docs/RE_GUIDE.md).
+"""k617-ctrl — command-line interface.
 
 Usage:
-    k617_remap.py list
-    k617_remap.py cfg <Cfg.ini>
-    k617_remap.py inspect <cap.json>
-    k617_remap.py diff <capA.json> <capB.json>
-    k617_remap.py export <cap.json> <frames.json>
-    k617_remap.py replay <frames.json> [--dry-run] [--delay-ms N]
-    k617_remap.py rgb <color>              # known-good RGB writer (FLASH WRITE!)
+    k617-ctrl list
+    k617-ctrl cfg <Cfg.ini>
+    k617-ctrl inspect <cap.json>
+    k617-ctrl diff <capA.json> <capB.json>
+    k617-ctrl export <cap.json> <frames.json>
+    k617-ctrl replay <frames.json> [--dry-run] [--delay-ms N]
+    k617-ctrl rgb <color>              # known-good RGB writer (FLASH WRITE!)
+    k617-ctrl restore <Cfg.ini>        # full keymap Restore sequence (FLASH WRITE!)
 """
 from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from k617_capture import diff_captures, export_frames, load_frames, load_tshark_json, significant
-from k617_cfg import CfgIni
-from k617_hid import K617, NoDeviceError, rgb_sequence
-from k617_keymap import KeymapEncoder
+from .capture import diff_captures, export_frames, load_frames, load_tshark_json, significant
+from .cfg import CfgIni
+from .hid import K617, NoDeviceError, rgb_all
+from .keymap import KeymapEncoder
+from .protocol import RESTORE_CONSTANT_FRAMES
 
 
 def cmd_list(_):
     import hid
-    from k617_protocol import PID, VID
+    from .protocol import PID, VID
 
     for d in hid.enumerate(VID, PID):
         print(d["path"], "iface", d.get("interface_number"), "usage", hex(d.get("usage_page", 0)))
@@ -78,7 +73,7 @@ def cmd_replay(args):
     frames = load_frames(args.frames)
     print(f"{len(frames)} frames loaded from {args.frames}")
     for i, f in enumerate(frames):
-        from k617_protocol import frame_kind
+        from .protocol import frame_kind
         print(f"  {i}: {frame_kind(f)} ({len(f)}B)")
     try:
         dev = K617(dry_run=args.dry_run)
@@ -93,7 +88,7 @@ def cmd_replay(args):
 
 
 def cmd_rgb(args):
-    from k617_protocol import LED_INDEX
+    from .protocol import LED_INDEX
 
     color = {"red": (255, 0, 0), "green": (0, 255, 0), "blue": (0, 0, 255),
              "white": (255, 255, 255), "off": (0, 0, 0)}.get(args.color.lower())
@@ -122,15 +117,15 @@ def cmd_rgb(args):
 def cmd_restore(args):
     cfg = CfgIni(args.cfg)
     keymap = KeymapEncoder(cfg).build()
-    const = Path(__file__).resolve().parent / "data"
+    # exact capture order: INIT, INIT, MODE, CANVAS, ROUTING, KEYMAP, EXEC
     frames = [
         bytes.fromhex("050581000000"),       # INIT
         bytes.fromhex("0583b6000000"),       # INIT
-        (const / "const-mode.bin").read_bytes(),
-        (const / "const-canvas.bin").read_bytes(),
-        (const / "const-routing.bin").read_bytes(),
+        RESTORE_CONSTANT_FRAMES[0],          # MODE
+        RESTORE_CONSTANT_FRAMES[1],          # CANVAS
+        RESTORE_CONSTANT_FRAMES[2],          # ROUTING
         keymap,                               # 06 04 d4 keymap block
-        (const / "const-exec.bin").read_bytes(),
+        RESTORE_CONSTANT_FRAMES[3],          # EXEC (5AA5 commit)
     ]
     print(f"built {len(frames)} frames from {args.cfg}")
     print(f"  keymap block: {len(keymap)}B, must equal 1032")

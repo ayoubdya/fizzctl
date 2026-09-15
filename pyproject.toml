@@ -1,7 +1,7 @@
 [project]
 name = "k617-ctrl"
 version = "0.1.0"
-description = "Add your description here"
+description = "Linux tooling for the Redragon K617 Fizz: Cfg.ini parser, keymap restore, per-key RGB"
 readme = "README.md"
 authors = [
     { name = "microgod", email = "ayoubdya@gmail.com" }
@@ -18,3 +18,6 @@ k617-ctrl = "k617_ctrl:main"
 [build-system]
 requires = ["uv_build>=0.12.13,<0.13.0"]
 build-backend = "uv_build"
+
+[tool.uv]
+package = true

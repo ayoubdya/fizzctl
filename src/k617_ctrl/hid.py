@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import hid
 
-from k617_protocol import PID, VID
+from .protocol import PID, VID
 
 
 class NoDeviceError(Exception):
@@ -84,7 +84,7 @@ class K617:
 
 
 def _kind(frame: bytes) -> str:
-    from k617_protocol import frame_kind
+    from .protocol import frame_kind
 
     return frame_kind(frame)
 
@@ -94,13 +94,11 @@ def rgb_sequence(led_colors: dict[int, tuple[int, int, int]]) -> list[bytes]:
     """Build the 5-frame RGB-write sequence for the given per-key colors.
 
     led_colors maps LED index -> (r, g, b). Led indices live in
-    k617_protocol.LED_INDEX.  This mirrors k617-fizz/k617_rgb.py but loads
-    the routing/commit blobs from the captured fw-static template so we never
-    hand-construct firmware-critical regions.
+    protocol.LED_INDEX.
 
     NOTE: the EXEC frame commits to flash (5AA5 magic). Do not loop this.
     """
-    from k617_protocol import FRAME_CANVAS, NAME_TO_INDEX, base_frames, set_key_color
+    from .protocol import FRAME_CANVAS, NAME_TO_INDEX, base_frames, set_key_color
 
     frames = [bytearray(f) for f in base_frames()]
     canvas = frames[FRAME_CANVAS]
@@ -112,6 +110,6 @@ def rgb_sequence(led_colors: dict[int, tuple[int, int, int]]) -> list[bytes]:
 
 
 def rgb_all(color: tuple[int, int, int]) -> list[bytes]:
-    from k617_protocol import LED_INDEX
+    from .protocol import LED_INDEX
 
     return rgb_sequence({idx: color for idx in LED_INDEX})

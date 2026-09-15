@@ -3,19 +3,16 @@
 Sources of truth (all reverse-engineered from USB captures of the OEM software):
   * orignalbox/k617-fizz   — 5-step RGB write; INIT / P1 / P2 / EXEC
   * MrSchrodingers/fizz-rgb — firmware-effect templates + Sinodragon 382-byte per-key
-  * This repo's docs/RE_GUIDE.md — the keymap/Restore sequence (work in progress)
+  * This repo's docs/RE_GUIDE.md — the keymap/Restore sequence
 
 Nothing in this module talks to hardware; it's pure constants + helpers.
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
+from .blobs import CONST_CANVAS, CONST_EXEC, CONST_MODE, CONST_ROUTING, FW_FRAMES
 
 VID = 0x258A
 PID = 0x0049
-
-DATA_DIR = Path(__file__).resolve().parent / "data"
 
 # ---- report IDs seen in HID descriptors (interface 1, vendor usage 0xFF00) ----
 REPORT_IDS = [0x05, 0x06, 0x08]
@@ -25,9 +22,8 @@ SIZE_INIT = 6
 SIZE_BLOCK = 1032
 SIZE_PERKEY = 382
 
-# ---- known-good packet interiors (from the fizz-rgb firmware templates) ----
-# These are complete captured frames for the "static" firmware effect.
-# Index in the template list:
+# ---- known-good packet interiors (inlined in blobs.py from captures) ----
+# Index in the static-effect template (FW_FRAMES):
 #   0 = INIT            (05 83 b6 00 00 00)
 #   1 = mode/config     (06 08 b8 00 40 ...)
 #   2 = RGB canvas base (06 09 bc 00 40 ...)
@@ -35,15 +31,22 @@ SIZE_PERKEY = 382
 #   4 = EXEC/commit     (06 03 b6 00 00 ...)  — contains 5A A5 flash-commit magic
 FRAME_INIT, FRAME_MODE, FRAME_CANVAS, FRAME_ROUTING, FRAME_EXEC = range(5)
 
-TEMPLATE: list[bytes] | None = None
+# Constant frames of the Restore sequence (06 xx xx 00 40 ...), 1032 bytes each.
+RESTORE_CONSTANT_FRAMES: list[bytes] = [
+    CONST_MODE,    # 06 08 b8 00 40
+    CONST_CANVAS,  # 06 09 bc 00 40
+    CONST_ROUTING, # 06 09 c0 00 40
+    CONST_EXEC,    # 06 03 b6 ... 5AA5 commit
+]
 
 
 def base_frames(effect: str = "fw-static") -> list[bytes]:
-    """Load a captured firmware-effect template as a list of raw frame bytes."""
-    path = DATA_DIR / f"{effect}.json"
-    with open(path) as fh:
-        frames = json.load(fh)
-    return [bytes(f) for f in frames]
+    """Return the captured static-effect frame template.
+
+    `effect` is accepted for API compatibility; only the built-in template is
+    shipped (no data files on disk anymore).
+    """
+    return [bytes(f) for f in FW_FRAMES]
 
 
 def frame_kind(frame: bytes) -> str:
@@ -92,7 +95,7 @@ NAME_TO_INDEX = {name: idx for idx, name in LED_INDEX.items()}
 
 
 def set_key_color(frame: bytearray, led_index: int, rgb: tuple[int, int, int]) -> None:
-    """Patch one key's RGB into a 1032-byte CANVAS frame (returns modified)."""
+    """Patch one key's RGB into a 1032-byte CANVAS frame (in place)."""
     r, g, b = rgb
     frame[RED_BASE + led_index] = r
     frame[GREEN_BASE + led_index] = g

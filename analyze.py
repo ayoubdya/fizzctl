@@ -16,9 +16,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from k617_capture import load_tshark_json, diff_captures, significant
-from k617_protocol import frame_kind
+from k617_ctrl.capture import load_tshark_json, diff_captures, significant
+from k617_ctrl.protocol import frame_kind
 
 
 CAPTURES = ["r2.json", "r3.json", "r4.json", "r5.json"]

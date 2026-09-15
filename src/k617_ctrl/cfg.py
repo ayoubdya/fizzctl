@@ -71,7 +71,6 @@ class CfgIni:
                     self.keys[int(m.group("idx"))] = KeyEntry(
                         int(m.group("idx")), geom, tuple(be), matrix
                     )
-        # recover K<idx> from raw section lines that use K<idx> as the key
         self._fill_from_raw(parser)
 
     def _fill_from_raw(self, parser):

@@ -1,9 +1,8 @@
-"""Analysis of USB captures of the K617 OEM software.
+"""USB capture import/diff/export for the K617 OEM software.
 
 Inputs accepted:
   * Wireshark JSON : `tshark -r cap.pcapng -T json > cap.json` (recommended)
   * raw .pcap     : Linux usbmon capture, parsed with dpkt
-  * .pcapng       : converted once by tshark on the machine that has it
 
 The job:
   1. pull every HID feature-report payload out of the USB stream,
@@ -20,7 +19,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
-from k617_protocol import frame_kind
+from .protocol import frame_kind
 
 SET_REPORT = 0x09
 GET_REPORT = 0x01
@@ -69,12 +68,7 @@ def _first(it, n: int, default=None):
 
 
 def load_tshark_json(path: str) -> list[FrameCapture]:
-    """Parse `tshark -T json` output into FrameCapture records.
-
-    Handles both plain tshark exports (usb layer carries the payload and
-    setup fields) and Wireshark-GUI exports (setup fields live in the
-    "Setup Data" layer; payload in `usb.data_fragment` on either layer).
-    """
+    """Parse `tshark -T json` output into FrameCapture records."""
     with open(path) as fh:
         packets = json.load(fh)
     out: list[FrameCapture] = []
@@ -100,7 +94,6 @@ def _parse_usb_layer(u: dict, setup: dict | None = None) -> FrameCapture | None:
     transfer = _first(u.get("usb.transfer_type"), 0)
     transfer = {"0x02": "control", "0x03": "interrupt"}.get(transfer, str(transfer))
 
-    # payload fragment may sit on the usb layer or the Setup Data layer
     data = _as_bytes(u.get("usb.data_fragment"))
     if not data:
         data = _as_bytes(u.get("usb.capdata"))
@@ -122,7 +115,6 @@ def _parse_usb_layer(u: dict, setup: dict | None = None) -> FrameCapture | None:
         wv = (setup.get("usbhid.setup.wValue") or setup.get("usb.setup.wValue")
               or setup.get("usb.wValue"))
         if wv is None:
-            # wValue may be in the wValue_tree as ReportID
             tree = setup.get("usbhid.setup.wValue_tree")
             if isinstance(tree, dict):
                 rid = tree.get("usbhid.setup.ReportID")
@@ -168,7 +160,6 @@ def load_pcap_usbmon(path: str) -> list[FrameCapture]:
             except Exception:
                 continue
             data = bytes(u.transfer_buffer) if u.xfer_type & 0x80 else None
-            # reconstruct direction from the URB type
             direction = "IN" if u.urb_type == 0x55 else "OUT"
             out.append(FrameCapture(direction=direction, transfer="urb", request=None, report_id=None, data=data or b""))
     return out
@@ -180,11 +171,7 @@ def significant(records: list[FrameCapture], direction: str = "OUT") -> list[Fra
 
 
 def diff_captures(a: list[FrameCapture], b: list[FrameCapture]) -> list[dict]:
-    """Align two captures and report the changed byte positions.
-
-    The captures are aligned in order (the OEM software sends the same
-    number of blocks every time). Returns per-frame reports.
-    """
+    """Align two captures and report the changed byte positions."""
     order_a = significant(a)
     order_b = significant(b)
     changes = []

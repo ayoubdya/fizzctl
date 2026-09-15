@@ -11,31 +11,52 @@ vendor HID interface (`258a:0049`, interface 1, usage page `0xFF00`).
 | Cfg.ini parser (`[OPT]`/`[FN]`/`[KEY]`) | ✅ working |
 | USB capture inspect / one-key-change diff | ✅ working |
 | Capture-to-frames export + dry-run replay | ✅ working |
-| **Keymap Restore write on Linux** | 🔴 **under RE** — see `docs/RE_GUIDE.md` |
+| **Keymap Restore write on Linux** | ✅ works — verified byte-for-byte against captures |
 
 ## Layout
 
 ```
-k617_protocol.py   constants, report IDs, known frame kinds, RGB plane layout
-k617_cfg.py        Cfg.ini parser → mapping triples + matrix coords
-k617_hid.py        hidapi wrapper + known-good RGB sequence builder
-k617_capture.py    tshark-JSON / usbmon-pcap import, diff, export
-k617_remap.py      CLI entry point
-data/fw-static.json  captured static-effect frames (INIT/CANVAS/ROUTING/EXEC)
-docs/RE_GUIDE.md     the keymap reverse-engineering playbook
-captures/            put tshark JSON exports here
+src/k617_ctrl/
+  __init__.py    package entry point → cli.main()
+  cli.py         CLI entry point (list/cfg/inspect/diff/export/replay/rgb/restore)
+  protocol.py    constants, report IDs, known frame kinds, RGB plane layout
+  cfg.py         Cfg.ini parser → mapping triples + matrix coords
+  keymap.py      06 04 d4 keymap-block encoder (reproduces captures exactly)
+  hid.py         hidapi wrapper + known-good RGB sequence builder
+  capture.py     tshark-JSON / usbmon-pcap import, diff, export
+  blobs.py       captured firmware frames inlined as hex (no binary files)
+captures/        tshark JSON exports (RE datasets; not shipped in the wheel)
+frames/          exported replay frames (JSON)
+docs/RE_GUIDE.md the keymap reverse-engineering playbook
+analyze.py       one-shot RE inspection over all captures
 ```
 
-## Quickstart
+## Quickstart (uv)
 
 ```bash
-./.venv/bin/python k617_remap.py list
-./.venv/bin/python k617_remap.py cfg ../redragon-k617-key-remap/Cfg.ini
-./.venv/bin/python k617_remap.py inspect captures/r3.json
-./.venv/bin/python k617_remap.py diff   captures/r2.json captures/r3.json
-./.venv/bin/python k617_remap.py export captures/r2.json frames.json
-./.venv/bin/python k617_remap.py replay frames.json --dry-run
+uv sync
+uv run k617-ctrl list
+uv run k617-ctrl cfg ../redragon-k617-key-remap/Cfg.ini
+uv run k617-ctrl inspect captures/r3.json
+uv run k617-ctrl diff   captures/r2.json captures/r3.json
+uv run k617-ctrl export captures/r2.json frames.json
+uv run k617-ctrl replay frames.json --dry-run
 ```
+
+Or install it as a package:
+
+```bash
+uv build                      # build sdist + wheel
+uv tool install .             # or: pip install dist/*.whl
+k617-ctrl --help
+```
+
+## Data provenance
+
+The constant frame blocks (MODE / CANVAS / ROUTING / EXEC) and the RGB
+static-effect template used to be shipped as separate binary/JSON files.
+They are now inlined as hex in `src/k617_ctrl/blobs.py`, so the wheel is
+self-contained — no `data/` directory needed at runtime.
 
 ## HID access without root
 

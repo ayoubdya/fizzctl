@@ -109,19 +109,20 @@ def encode_firmware_effect(
 
     exec_[21] = eid
 
-    # Track only the CLI-supplied speed/brightness; missing -> template default.
-    cur = exec_[69]
-    cur_speed = (cur >> 4) & 0x0F
-    cur_bright = cur & 0x0F
-    new_speed = max(0, min(15, round(speed))) if speed is not None else (
-        defaults[0] if speed is None else cur_speed)
-    new_bright = max(0, min(15, round(brightness))) if brightness is not None else (
-        defaults[1] if brightness is None else cur_bright)
-    # Effective bytes for EXEC[69] and [71] (they mirror each other).
+    # Byte 39 is the active speed×brightness slot (high nibble = speed 1..4,
+    # low nibble = brightness 1..4).  Verified by diffing USB captures —
+    # previously bytes 69/71 were patched (from the fizz-rgb template index
+    # which uses a different byte layout); those are ignored by this firmware.
+    target_speed = speed if speed is not None else defaults[0]
+    target_bright = brightness if brightness is not None else defaults[1]
+    new_speed = max(0, min(15, round(target_speed)))
+    new_bright = max(0, min(15, round(target_bright)))
     packed = ((new_speed & 0x0F) << 4) | (new_bright & 0x0F)
-
-    exec_[69] = packed
-    exec_[71] = packed
+    exec_[39] = packed
+    # Mirror into the effect's own table slot (each entry is 2 bytes wide
+    # starting at byte 39; slot[eid] lives at 39 + eid*2).
+    if 1 <= eid <= 19:
+        exec_[39 + eid * 2] = packed
 
     return [bytes(frames[0])] + [bytes(f) for f in frames[1:]]
 

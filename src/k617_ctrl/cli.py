@@ -272,41 +272,6 @@ def _kind(frame: bytes) -> str:
     return frame_kind(frame)
 
 
-def cmd_restore(args):
-    cfg = CfgIni(args.cfg)
-    keymap = KeymapEncoder(cfg).build()
-    # exact capture order: INIT, INIT, MODE, CANVAS, ROUTING, KEYMAP, EXEC
-    frames = [
-        bytes.fromhex("050581000000"),       # INIT
-        bytes.fromhex("0583b6000000"),       # INIT
-        RESTORE_CONSTANT_FRAMES[0],          # MODE
-        RESTORE_CONSTANT_FRAMES[1],          # CANVAS
-        RESTORE_CONSTANT_FRAMES[2],          # ROUTING
-        keymap,                               # 06 04 d4 keymap block
-        RESTORE_CONSTANT_FRAMES[3],          # EXEC (5AA5 commit)
-    ]
-    print(f"built {len(frames)} frames from {args.cfg}")
-    print(f"  keymap block: {len(keymap)}B, must equal 1032")
-    if len(keymap) != 1032:
-        print("error: keymap block is not 1032 bytes")
-        return 1
-    if not args.dry_run:
-        print("warning: commits keymap to flash (5AA5). Continue? y/N")
-        if input().strip().lower() != "y":
-            print("aborted")
-            return 0
-    try:
-        dev = K617(dry_run=args.dry_run)
-    except NoDeviceError as e:
-        print(f"error: {e}")
-        return 1
-    try:
-        dev.send_sequence(frames, delay_ms=args.delay_ms)
-    finally:
-        dev.close()
-    return 0
-
-
 def main():
     p = argparse.ArgumentParser(description="Redragon K617 reverse-engineering toolkit")
     sub = p.add_subparsers(dest="cmd", required=True)

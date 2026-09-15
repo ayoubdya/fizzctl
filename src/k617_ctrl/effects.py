@@ -39,10 +39,10 @@ from .protocol import base_frames
 EFFECTS = [
     # (name,            aliases,             id,   accepts_color, default_sb,  notes)
     ("fixed-on",        ("static",),         0x01, True,  0x33, ""),
-    ("respire",         (),                  0x02, True,  0x33, "pending-live-verify"),
+    ("respire",         (),                  0x02, True,  0x33, ""),
     ("rainbow",         (),                  0x03, True,  0x33, ""),
-    ("flash-away",      (),                  0x04, True,  0x33, "pending-live-verify"),
-    ("raindrops",       (),                  0x05, True,  0x33, "pending-live-verify"),
+    ("flash-away",      (),                  0x04, True,  0x33, ""),
+    ("raindrops",       (),                  0x05, True,  0x33, ""),
     ("rainbow-wheel",   ("wheel",),          0x06, True,  0x33, ""),
     ("ripples-shining", (),                  0x07, True,  0x33, "pending-live-verify"),
     ("stars-twinkle",   ("star-twinkle",),   0x08, True,  0x33, ""),

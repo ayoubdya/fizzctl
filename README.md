@@ -8,7 +8,7 @@ vendor HID interface (`258a:0049`, interface 1, usage page `0xFF00`).
 | Capability | Status |
 |---|---|
 | Per-key RGB write (5-frame flash-commit protocol) | ✅ working reference |
-| 8 firmware-native effects (rainbow, snake, wheel, …) w/ speed+brightness | ✅ working |
+| 22 firmware-native effects (matching official software) w/ speed+brightness | ✅ working |
 | Host-side per-key animations (solid/blink/pulse/chase/wave/rainbow/drop) | ✅ working |
 | Per-key painting (single key or many) via 382-byte report | ✅ working |
 | Cfg.ini parser (`[OPT]`/`[FN]`/`[KEY]`) | ✅ working |
@@ -52,11 +52,18 @@ uv run k617-ctrl replay frames.json --dry-run
 ## RGB lighting quickstart
 
 ```bash
-# 8 firmware-native effects (flash-commit, survive power-off).
-# Colors/speed/brightness optional. Effect names: static rainbow wheel
-# star-twinkle snake sine-wave waterfall rainbow-blossom
+# 22 firmware-native effects (flash-commit, survive power-off).
+# Colors/speed/brightness optional.
+# Supports full official Redragon list: fixed-on (static), respire, rainbow,
+# flash-away, raindrops, rainbow-wheel (wheel), ripples-shining, stars-twinkle,
+# shadow-disappear, retro-snake (snake), neon-stream, reaction, sine-wave,
+# retinue-scanning, rotating-windmill, colorful-waterfall (waterfall),
+# blossoming (rainbow-blossom), rotating-storm, collision, perfect,
+# self-define, off.
 uv run k617-ctrl effect rainbow --speed 2 --brightness 4
-uv run k617-ctrl effect static  --color 00ff00 --brightness 3
+uv run k617-ctrl effect fixed-on --color 00ff00 --brightness 3
+# or using aliases:
+uv run k617-ctrl effect static   --color 00ff00 --brightness 3
 
 # Per-key painting (volatile, does NOT survive power-off).
 # Keys are named by the top-left legend (Esc 1 2 .. Fn) or single-char labels.
@@ -78,7 +85,8 @@ printf 'y\n' | uv run k617-ctrl effect static --color ffffff --brightness 4
 
 * **Firmware effects** flash 5 frames (INIT → GET_REPORT handshake → MODE →
   CANVAS → ROUTING → EXEC) with a `5AA5` commit, like the keymap restore.
-  All 8 templates are byte-identical to the upstream `fizz-rgb` captures.
+  The 8 original templates match upstream `fizz-rgb` captures; all 22 modes
+  match the official Redragon software menu order.
 * **Per-key painting / animations** push a single 382-byte report
   (`08 0A 7A 01` + 96 RGB triplets, 16-col × 6-row Sinodragon raster,
   pos = col*6+row) per frame with no handshake and no flash write.

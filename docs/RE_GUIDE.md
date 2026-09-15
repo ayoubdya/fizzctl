@@ -3,19 +3,53 @@
 Goal: replicate the OEM software's **Restore** button on Linux so the `Cfg.ini`
 keymap can be flashed to the keyboard's onboard memory without Windows.
 
-We already own two sibling protocols for this keyboard's vendor interface
-(`258a:0049`, interface 1, usage page `0xFF00`):
+## STATUS — decoded ✅ (one capture left to go)
 
-| Protocol | Report | Frames | Status |
+The Restore sequence was captured (5 runs) and fully identified. A Restore is
+**7 host→device feature-report writes** (all interface 1, report id 6 except
+the INITs on report id 5):
+
+| # | report | frame | role |
 |---|---|---|---|
-| Static RGB write (k617-fizz) | `0x06` 1032 B | INIT(05) → GET_REPORT → CANVAS(06 09 bc) → ROUTING(06 09 c0) → EXEC(06 03 b6, `5AA5` commit) | ✅ decoded |
-| Sinodragon per-key (fizz-rgb) | `0x08` 382 B | single frame, header `08 0a 7a 01`, 96 RGB triplets | ✅ decoded |
-| **Keymap / Restore** | **unknown** | **unknown** | ❌ this doc |
+| 1 | `05` | `05 05 81 00 00 00` | INIT |
+| 2 | `05` | `05 83 b6 00 00 00` | INIT (`05 83 b6` matches the k617-fizz opener) |
+| 3 | `06` | MODE `06 08 b8` 1032B | RGB mode state |
+| 4 | `06` | CANVAS `06 09 bc` 1032B | per-key RGB canvas |
+| 5 | `06` | ROUTING `06 09 c0` 1032B | key wiring / routing map |
+| 6 | `06` | **KEYMAP `06 04 d4` 1032B** | ← **the keymap block** |
+| 7 | `06` | EXEC `06 03 b6` 1032B | commit (`5A A5` at offset 0x0E = flash-write magic) |
 
-Every write to this keyboard ends in a flash commit (`5AA5` in the EXEC block),
-so Restore almost certainly uses the same envelope: *some number of data blocks
-+ an EXEC-style commit*. The unknown is the **data block layout** for the
-`[KEY]`/`[FN]` tables.
+Plus GET_REPORT reads (device→host) that are *not* replayed on Linux.
+
+**What the diff experiments proved:**
+* A stock Restore (R2) vs a single base-layer remap (R3, RShift→F12) differ in
+  **only** the `06 04 d4` block (2 bytes). MODE / CANVAS / ROUTING / EXEC are
+  byte-identical. The envelope is position-stable: the same 5 frames + 2 INITs
+  every time.
+* The KEYMAP block is a table of **4-byte records** after an 8-byte command
+  header (`06 04 d4 00 40 00 00 00`).
+* Single-key changes land at predictable record offsets:
+  * R3 (RShift→F12): `0x150` `06→00`, `0x153` `e5→00` (record zeroed)
+  * R5 (`5`→F11): `0x14b` `31→4c`
+  * R5 (`\`→Delete): `0x22f` `22→44`
+  * R4 (added FN+Tab): 62 bytes — count/type at `0x10`,`0x13`, an F1..F12
+    block, and index-cascade +1 shifts (adding one FN entry renumbers the
+    function indices that follow).
+
+## TL;DR next step
+
+Run the OEM software in Windows **one last time** with your *final* `Cfg.ini`,
+press Restore, capture it, bring `r-final.json` back here, and:
+
+```bash
+./.venv/bin/python k617_remap.py export captures/r-final.json frames/r-final.json
+./.venv/bin/python k617_remap.py diff  captures/r2.json captures/r-final.json   # sanity
+./.venv/bin/python k617_remap.py replay frames/r-final.json                      # flash!
+```
+
+That is guaranteed correct because it replays the exact bytes the OEM software
+sent for your exact config. The `06 04 d4` encoder remains an open RE question
+(optional — see §3).
 
 ---
 

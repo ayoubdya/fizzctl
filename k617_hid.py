@@ -39,7 +39,15 @@ class K617:
                 "K617 vendor interface not found. Is it plugged in? "
                 "Run: sudo udevadm control --reload && sudo udevadm trigger"
             )
-        dev = hid.Device(path=paths[0])
+        dev = hid.Device(path=paths[0]) if hasattr(hid, "Device") else \
+            K617._open_ctypes(paths[0])
+        return dev
+
+    @staticmethod
+    def _open_ctypes(path):
+        """Open via the trezor 'hid' ctypes module (hid.device/open_path)."""
+        dev = hid.device()
+        dev.open_path(path)  # accepts str or bytes
         return dev
 
     def send_feature(self, data: bytes) -> None:

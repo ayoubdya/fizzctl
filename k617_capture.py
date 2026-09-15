@@ -25,7 +25,7 @@ from k617_protocol import frame_kind
 SET_REPORT = 0x09
 GET_REPORT = 0x01
 
-_HEX = re.compile(r"^[0-9a-fA-F\s]+$")
+_HEX = re.compile(r"^[0-9a-fA-F\s:]+$")
 
 
 @dataclass
@@ -51,7 +51,12 @@ def _as_bytes(value) -> bytes | None:
         s = value.strip()
         if not s:
             return None
-        return bytes.fromhex(s) if _HEX.match(s) else None
+        if _HEX.match(s):
+            return bytes.fromhex(s.replace(":", ""))
+        try:
+            return s.encode("utf-8", "replace")
+        except Exception:
+            return None
     if isinstance(value, list):
         return bytes(int(x) for x in value)
     return None
@@ -64,7 +69,12 @@ def _first(it, n: int, default=None):
 
 
 def load_tshark_json(path: str) -> list[FrameCapture]:
-    """Parse `tshark -T json` output into FrameCapture records."""
+    """Parse `tshark -T json` output into FrameCapture records.
+
+    Handles both plain tshark exports (usb layer carries the payload and
+    setup fields) and Wireshark-GUI exports (setup fields live in the
+    "Setup Data" layer; payload in `usb.data_fragment` on either layer).
+    """
     with open(path) as fh:
         packets = json.load(fh)
     out: list[FrameCapture] = []
@@ -73,45 +83,65 @@ def load_tshark_json(path: str) -> list[FrameCapture]:
         usb = layers.get("usb")
         if not usb:
             continue
-        # some frames carry nested usb layers → normalise to a list
         usb_layers = usb if isinstance(usb, list) else [usb]
+        setup = layers.get("Setup Data")
         for u in usb_layers:
             if not isinstance(u, dict):
                 continue
-            fc = _parse_usb_layer(u)
+            fc = _parse_usb_layer(u, setup)
             if fc is not None:
                 out.append(fc)
     return out
 
 
-def _parse_usb_layer(u: dict) -> FrameCapture | None:
+def _parse_usb_layer(u: dict, setup: dict | None = None) -> FrameCapture | None:
     src = _first(u.get("usb.src"), 0)
     dst = _first(u.get("usb.dst"), 0)
     transfer = _first(u.get("usb.transfer_type"), 0)
     transfer = {"0x02": "control", "0x03": "interrupt"}.get(transfer, str(transfer))
 
-    data = _as_bytes(_first(u.get("usb.data_fragment"), 0))
+    # payload fragment may sit on the usb layer or the Setup Data layer
+    data = _as_bytes(u.get("usb.data_fragment"))
+    if not data:
+        data = _as_bytes(u.get("usb.capdata"))
+    if not data and setup:
+        data = _as_bytes(setup.get("usb.data_fragment"))
     if not data:
         return None
 
-    setup = u.get("usb.setup") or {}
-    if isinstance(setup, list):
-        setup = setup[0] if setup else {}
+    setup = setup or {}
     request = None
-    if isinstance(setup, dict):
-        key = setup.get("usb.bRequest") or setup.get("usb.bRequest") or setup.get("usb.setup.bRequest") or setup.get("usb.bRequest")
+    for key in ("usb.bRequest", "usb.setup.bRequest", "usbhid.setup.bRequest"):
+        key = setup.get(key) or u.get(key)
         if key is not None:
             request = int(key, 16) if isinstance(key, str) else int(key)
+            break
+
     report_id = None
-    if isinstance(setup, dict) and request is not None:
-        wv = setup.get("usb.setup.wValue.byte0") or setup.get("usb.wValue.byte0")
+    if request is not None:
+        wv = (setup.get("usbhid.setup.wValue") or setup.get("usb.setup.wValue")
+              or setup.get("usb.wValue"))
+        if wv is None:
+            # wValue may be in the wValue_tree as ReportID
+            tree = setup.get("usbhid.setup.wValue_tree")
+            if isinstance(tree, dict):
+                rid = tree.get("usbhid.setup.ReportID")
+            else:
+                rid = None
+            wv = rid
         if wv is not None:
-            report_id = int(wv, 16) if isinstance(wv, str) else int(wv)
+            v = int(str(wv).replace("0x", ""), 16) if isinstance(wv, str) else int(wv)
+            report_id = (v & 0xFF) if v <= 0xFFFF else (int(str(wv).split()[1]) & 0xFF)
 
     direction = "OUT"
-    bmrt = _first(u.get("usb.bmRequestType"), 0)
-    if isinstance(bmrt, str):
-        direction = "OUT" if (int(bmrt, 16) & 0x80) == 0 else "IN"
+    bmrt = _first(u.get("usb.bmRequestType"), setup.get("usb.bmRequestType"), 0)
+    if bmrt is not None:
+        if isinstance(bmrt, str) and "0x" in bmrt:
+            direction = "OUT" if (int(bmrt, 16) & 0x80) == 0 else "IN"
+        elif ":" in str(bmrt):
+            direction = "OUT" if (int(str(bmrt)[:4], 16) & 0x80) == 0 else "IN"
+        else:
+            direction = "OUT" if src == "host" else ("IN" if dst == "host" else "OUT")
     else:
         direction = "OUT" if src == "host" else ("IN" if dst == "host" else "OUT")
 

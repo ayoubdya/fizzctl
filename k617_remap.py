@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from k617_capture import diff_captures, export_frames, load_frames, load_tshark_json, significant
 from k617_cfg import CfgIni
 from k617_hid import K617, NoDeviceError, rgb_sequence
+from k617_keymap import KeymapEncoder
 
 
 def cmd_list(_):
@@ -118,6 +119,41 @@ def cmd_rgb(args):
     return 0
 
 
+def cmd_restore(args):
+    cfg = CfgIni(args.cfg)
+    keymap = KeymapEncoder(cfg).build()
+    const = Path(__file__).resolve().parent / "data"
+    frames = [
+        bytes.fromhex("050581000000"),       # INIT
+        bytes.fromhex("0583b6000000"),       # INIT
+        (const / "const-mode.bin").read_bytes(),
+        (const / "const-canvas.bin").read_bytes(),
+        (const / "const-routing.bin").read_bytes(),
+        keymap,                               # 06 04 d4 keymap block
+        (const / "const-exec.bin").read_bytes(),
+    ]
+    print(f"built {len(frames)} frames from {args.cfg}")
+    print(f"  keymap block: {len(keymap)}B, must equal 1032")
+    if len(keymap) != 1032:
+        print("error: keymap block is not 1032 bytes")
+        return 1
+    if not args.dry_run:
+        print("warning: commits keymap to flash (5AA5). Continue? y/N")
+        if input().strip().lower() != "y":
+            print("aborted")
+            return 0
+    try:
+        dev = K617(dry_run=args.dry_run)
+    except NoDeviceError as e:
+        print(f"error: {e}")
+        return 1
+    try:
+        dev.send_sequence(frames, delay_ms=args.delay_ms)
+    finally:
+        dev.close()
+    return 0
+
+
 def main():
     p = argparse.ArgumentParser(description="Redragon K617 reverse-engineering toolkit")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -139,12 +175,16 @@ def main():
     pr.add_argument("--delay-ms", type=int, default=30)
     px = sub.add_parser("rgb", help="known-good per-key RGB writer (flash write)")
     px.add_argument("color")
+    prs = sub.add_parser("restore", help="build+sends full Restore sequence from Cfg.ini (flash write)")
+    prs.add_argument("cfg")
+    prs.add_argument("--dry-run", action="store_true")
+    prs.add_argument("--delay-ms", type=int, default=30)
 
     args = p.parse_args()
     fn = {
         "list": cmd_list, "cfg": cmd_cfg, "inspect": cmd_inspect,
         "diff": cmd_diff, "export": cmd_export, "replay": cmd_replay,
-        "rgb": cmd_rgb,
+        "rgb": cmd_rgb, "restore": cmd_restore,
     }[args.cmd]
     return fn(args)
 

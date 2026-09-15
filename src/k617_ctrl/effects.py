@@ -30,44 +30,53 @@ from __future__ import annotations
 from .blobs import RGB_EXEC, RGB_INIT, RGB_SEC
 from .protocol import base_frames
 
-EFFECT_ID = {
-    "static": 0x01,
-    "rainbow": 0x03,
-    "wheel": 0x06,
-    "star-twinkle": 0x08,
-    "snake": 0x0A,
-    "sine-wave": 0x0D,
-    "waterfall": 0x10,
-    "rainbow-blossom": 0x11,
-}
+# Official Redragon software effect menu (order from K617 software).
+# The effect id byte at EXEC[21] equals the 1-indexed position in that menu:
+# 8 independently-captured effects (fizz-rgb / OpenRGB #2172) all land exactly
+# on their menu position (Fixed_on=0x01, Rainbow=0x03, ... Blossom=0x11), so
+# the un-captured ids are inferred by position and marked ``pending-live-verify``.
+# ``name`` is the canonical slug; ``aliases`` keep old short names working.
+EFFECTS = [
+    # (name,            aliases,             id,   accepts_color, default_sb,  notes)
+    ("fixed-on",        ("static",),         0x01, True,  0x33, ""),
+    ("respire",         (),                  0x02, True,  0x33, "pending-live-verify"),
+    ("rainbow",         (),                  0x03, True,  0x33, ""),
+    ("flash-away",      (),                  0x04, True,  0x33, "pending-live-verify"),
+    ("raindrops",       (),                  0x05, True,  0x33, "pending-live-verify"),
+    ("rainbow-wheel",   ("wheel",),          0x06, True,  0x33, ""),
+    ("ripples-shining", (),                  0x07, True,  0x33, "pending-live-verify"),
+    ("stars-twinkle",   ("star-twinkle",),   0x08, True,  0x33, ""),
+    ("shadow-disappear", (),                 0x09, True,  0x33, "pending-live-verify"),
+    ("retro-snake",     ("snake",),          0x0a, True,  0x44, ""),
+    ("neon-stream",     (),                  0x0b, True,  0x44, "pending-live-verify"),
+    ("reaction",        (),                  0x0c, True,  0x44, "pending-live-verify"),
+    ("sine-wave",       (),                  0x0d, True,  0x44, ""),
+    ("retinue-scanning", (),                 0x0e, True,  0x44, "pending-live-verify"),
+    ("rotating-windmill", (),                0x0f, True,  0x33, "pending-live-verify"),
+    ("colorful-waterfall", ("waterfall",),   0x10, True,  0x33, ""),
+    ("blossoming",      ("rainbow-blossom",), 0x11, True,  0x44, ""),
+    ("rotating-storm",  (),                  0x12, True,  0x33, "pending-live-verify"),
+    ("collision",       (),                  0x13, True,  0x33, "pending-live-verify"),
+    ("perfect",         (),                  0x14, True,  0x33, "pending-live-verify"),
+    ("self-define",     (),                  0x15, True,  0x33, "pending-live-verify"),
+    ("off",             ("off",),            0x16, True,  0x00, "pending-live-verify"),
+]
 
-# Default base color baked into each captured template (MODE[29..31]).
-EFFECT_COLOR = {
-    "static": (255, 0, 0),
-    "rainbow": (0, 255, 0),
-    "wheel": (0, 255, 0),
-    "star-twinkle": (0, 255, 0),
-    "snake": (0, 255, 0),
-    "sine-wave": (0, 255, 0),
-    "waterfall": (0, 255, 0),
-    "rainbow-blossom": (0, 255, 0),
-}
+EFFECT_ID: dict[str, int] = {n: eid for n, _, eid, *_ in EFFECTS}
+_ALIASES: dict[str, str] = {a: n for n, as_, *_ in EFFECTS for a in as_}
+EFFECT_ACCEPTS_COLOR = {n for n, _, _, ac, *_ in EFFECTS if ac}
+EFFECT_DEFAULTS = {n: (sb >> 4, sb & 0x0F) for n, _, _, _, sb, *_ in EFFECTS}
 
-# Which effects accept a user color (others ignore MODE[29..31]).
-EFFECT_ACCEPTS_COLOR = {"static", "snake", "star-twinkle", "waterfall"}
 
-# Effect -> defaults that describe the effect as a sorted sample of the
-# captured templates (speed/brightness nibbles + default) for CLI help.
-EFFECT_DEFAULTS = {
-    "static": (0x33, 0x33),
-    "rainbow": (0x33, 0x33),
-    "wheel": (0x33, 0x33),
-    "star-twinkle": (0x44, 0x44),
-    "snake": (0x44, 0x44),
-    "sine-wave": (0x44, 0x44),
-    "waterfall": (0x33, 0x33),
-    "rainbow-blossom": (0x44, 0x33),
-}
+def _canonical(name: str) -> str:
+    if name in EFFECT_ID:
+        return name
+    canon = _ALIASES.get(name)
+    if canon is None:
+        raise ValueError(
+            f"unknown effect {name!r}; choose from {', '.join(effect_names())}"
+        )
+    return canon
 
 
 def effect_names() -> list[str]:
@@ -87,27 +96,32 @@ def encode_firmware_effect(
     speed/brightness are 0..15 nibbles; Python ints get clamped.  A color is
     only applied when the effect accepts one.
     """
-    if name not in EFFECT_ID:
-        raise ValueError(f"unknown effect {name!r}; choose from {', '.join(effect_names())}")
+    name = _canonical(name)
+    eid = EFFECT_ID[name]
+    defaults = EFFECT_DEFAULTS[name]
 
     frames = [bytearray(f) for f in base_frames()]
     mode, canvas, routing, exec_ = frames[1], frames[2], frames[3], frames[4]
 
     if name in EFFECT_ACCEPTS_COLOR:
-        r, g, b = color if color is not None else EFFECT_COLOR[name]
+        r, g, b = color if color is not None else (255, 0, 0)
         mode[29], mode[30], mode[31] = r & 0xFF, g & 0xFF, b & 0xFF
 
-    exec_[21] = EFFECT_ID[name]
+    exec_[21] = eid
 
-    if speed is not None or brightness is not None:
-        cur = exec_[69]
-        cur_speed = (cur >> 4) & 0x0F
-        cur_bright = cur & 0x0F
-        new_speed = max(0, min(15, round(speed))) if speed is not None else cur_speed
-        new_bright = max(0, min(15, round(brightness))) if brightness is not None else cur_bright
-        packed = ((new_speed & 0x0F) << 4) | (new_bright & 0x0F)
-        exec_[69] = packed
-        exec_[71] = packed
+    # Track only the CLI-supplied speed/brightness; missing -> template default.
+    cur = exec_[69]
+    cur_speed = (cur >> 4) & 0x0F
+    cur_bright = cur & 0x0F
+    new_speed = max(0, min(15, round(speed))) if speed is not None else (
+        defaults[0] if speed is None else cur_speed)
+    new_bright = max(0, min(15, round(brightness))) if brightness is not None else (
+        defaults[1] if brightness is None else cur_bright)
+    # Effective bytes for EXEC[69] and [71] (they mirror each other).
+    packed = ((new_speed & 0x0F) << 4) | (new_bright & 0x0F)
+
+    exec_[69] = packed
+    exec_[71] = packed
 
     return [bytes(frames[0])] + [bytes(f) for f in frames[1:]]
 
@@ -183,8 +197,8 @@ def parse_color(s: str) -> tuple[int, int, int] | None:
 # Re-export the RGB canvas pieces used by the "static canvas" path so callers
 # only need one import site.
 __all__ = [
-    "EFFECT_ID", "EFFECT_COLOR", "EFFECT_ACCEPTS_COLOR", "EFFECT_DEFAULTS",
-    "effect_names", "encode_firmware_effect",
-    "PERKEY_HEADER", "PERKEY_PACKET_LEN", "PER_KEY_POS",
+    "EFFECTS", "EFFECT_ID", "EFFECT_ACCEPTS_COLOR", "EFFECT_DEFAULTS",
+    "effect_names", "encode_firmware_effect", "PERKEY_HEADER",
+    "PERKEY_PACKET_LEN", "PER_KEY_POS",
     "encode_per_key_frame", "encode_per_key_solid",
 ]

@@ -165,7 +165,7 @@ def cmd_effect(args):
         for n, eid in EFFECT_ID.items():
             defs = EFFECT_DEFAULTS[n]
             color = "yes" if n in EFFECT_ACCEPTS_COLOR else "-"
-            print(f"  {n:18s} id={eid:#04x} color:{color:3s} default sb={defs[0]//16}.{defs[0]%16}")
+            print(f"  {n:18s} id={eid:#04x} color:{color:3s} default sb={defs[0]}.{defs[1]}")
         return 1
 
     color = None

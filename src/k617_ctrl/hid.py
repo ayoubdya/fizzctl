@@ -12,6 +12,7 @@ transfers — the exact URBs you will see in USBPcap captures.
 from __future__ import annotations
 
 import os
+import time
 
 import hid
 
@@ -70,7 +71,7 @@ class K617:
         except Exception as e:
             if uid != 0 and not udev_rules_installed():
                 raise UdevRequiredError(
-                    f"Found your K617 but it could not be opened ({display}). "
+                    f"Found your K617 but it could not be opened ({display}).\n"
                     "The udev rules that let you access the keyboard without "
                     "sudo are not installed."
                 ) from e
@@ -156,11 +157,16 @@ def open_device(dry_run: bool = False, debug: bool = False) -> K617 | None:
             print(f"error: could not install udev rules: {ie}")
             return None
         print("udev rules installed. Reopening the keyboard...")
-        try:
-            return K617(dry_run=dry_run, debug=debug)
-        except NoDeviceError as e2:
-            print(f"error: {e2}")
-            return None
+        last_err = None
+        for _ in range(8):           # udev permission changes settle slowly
+            try:
+                return K617(dry_run=dry_run, debug=debug)
+            except NoDeviceError as e2:
+                last_err = e2
+                time.sleep(1.0)
+        print(f"error: {last_err}")
+        print("Hint: unplug and replug the keyboard, then run the command again.")
+        return None
     except NoDeviceError as e:
         print(e)
         return None

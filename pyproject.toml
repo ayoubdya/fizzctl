@@ -30,7 +30,6 @@ classifiers = [
 ]
 requires-python = ">=3.14"
 dependencies = [
-    "dpkt>=1.9.8",
     "hidapi>=0.15.0",
 ]
 

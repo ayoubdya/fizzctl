@@ -26,7 +26,6 @@ from __future__ import annotations
 # Baseline is the captured fw-static template (init + mode + canvas + routing
 # + exec).  Every other effect only differs in the 3-5 bytes listed below.
 # Indexes into base_frames(): 0=INIT, 1=MODE, 2=CANVAS, 3=ROUTING, 4=EXEC.
-from .blobs import RGB_EXEC, RGB_INIT, RGB_SEC
 from .protocol import base_frames
 
 # Official Redragon software effect menu (order from K617 software).
@@ -134,7 +133,6 @@ def encode_firmware_effect(
 
 PERKEY_HEADER = bytes.fromhex("080a7a01")
 PERKEY_PACKET_LEN = 382
-SINODRAGON_LED_COUNT = 96
 
 # K617 key name -> position in the 16x6 column-major raster (pos = col*6+row).
 # Rows 1..4 in the 6-row raster hold rows 0..4 of the keyboard; raster row 0

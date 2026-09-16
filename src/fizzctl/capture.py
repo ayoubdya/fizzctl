@@ -1,8 +1,7 @@
 """USB capture import/diff/export for the K617 OEM software.
 
-Inputs accepted:
+Input accepted:
   * Wireshark JSON : `tshark -r cap.pcapng -T json > cap.json` (recommended)
-  * raw .pcap     : Linux usbmon capture, parsed with dpkt
 
 The job:
   1. pull every HID feature-report payload out of the USB stream,
@@ -145,24 +144,6 @@ def _parse_usb_layer(u: dict, setup: dict | None = None) -> FrameCapture | None:
         data=data,
         meta={"frame": _first(u.get("usb.frame.number"), 0)},
     )
-
-
-def load_pcap_usbmon(path: str) -> list[FrameCapture]:
-    """Minimal Linux usbmon .pcap reader (dpkt)."""
-    import dpkt
-
-    out: list[FrameCapture] = []
-    with open(path, "rb") as fh:
-        pcap = dpkt.pcap.Reader(fh)
-        for _, buf in pcap:
-            try:
-                u = dpkt.usbmon.LinuxUSB(buf)
-            except Exception:
-                continue
-            data = bytes(u.transfer_buffer) if u.xfer_type & 0x80 else None
-            direction = "IN" if u.urb_type == 0x55 else "OUT"
-            out.append(FrameCapture(direction=direction, transfer="urb", request=None, report_id=None, data=data or b""))
-    return out
 
 
 def significant(records: list[FrameCapture], direction: str = "OUT") -> list[FrameCapture]:

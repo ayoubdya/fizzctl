@@ -4,21 +4,13 @@ Nothing in this module talks to hardware; it's pure constants + helpers.
 """
 from __future__ import annotations
 
-from .blobs import CONST_CANVAS, CONST_EXEC, CONST_MODE, CONST_ROUTING, FW_FRAMES
+from .blobs import CONST_CANVAS, CONST_EXEC, CONST_MODE, CONST_ROUTING, FW_TEMPLATE
 
 VID = 0x258A
 PID = 0x0049
 
-# ---- report IDs seen in HID descriptors (interface 1, vendor usage 0xFF00) ----
-REPORT_IDS = [0x05, 0x06, 0x08]
-
-# ---- known frame sizes ----
-SIZE_INIT = 6
-SIZE_BLOCK = 1032
-SIZE_PERKEY = 382
-
 # ---- known-good packet interiors (inlined in blobs.py from captures) ----
-# Index in the static-effect template (FW_FRAMES):
+# Index in the static-effect template (base_frames()):
 #   0 = INIT            (05 83 b6 00 00 00)
 #   1 = mode/config     (06 08 b8 00 40 ...)
 #   2 = RGB canvas base (06 09 bc 00 40 ...)
@@ -35,13 +27,9 @@ RESTORE_CONSTANT_FRAMES: list[bytes] = [
 ]
 
 
-def base_frames(effect: str = "fw-static") -> list[bytes]:
-    """Return the captured static-effect frame template.
-
-    `effect` is accepted for API compatibility; only the built-in template is
-    shipped (no data files on disk anymore).
-    """
-    return [bytes(f) for f in FW_FRAMES]
+def base_frames() -> list[bytes]:
+    """Return the captured static-effect frame template."""
+    return [bytes(f) for f in FW_TEMPLATE]
 
 
 def frame_kind(frame: bytes) -> str:

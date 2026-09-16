@@ -26,7 +26,7 @@ import sys
 from .animations import cmd_animate
 from .capture import diff_captures, export_frames, load_frames, load_tshark_json, significant
 from .cfg import CfgIni
-from .hid import K617, NoDeviceError, open_device
+from .hid import NoDeviceError, open_device, send_burst
 from .keymap import KeymapEncoder
 from .protocol import RESTORE_CONSTANT_FRAMES
 
@@ -91,7 +91,7 @@ def cmd_replay(args):
     if dev is None:
         return 1
     try:
-        dev.send_sequence(frames, delay_ms=args.delay_ms)
+        send_burst(dev, frames, handshake=False, delay_ms=args.delay_ms)
     finally:
         dev.close()
     return 0
@@ -123,7 +123,7 @@ def cmd_keymap(args):
     if dev is None:
         return 1
     try:
-        dev.send_sequence(frames, delay_ms=args.delay_ms)
+        send_burst(dev, frames, handshake=False, delay_ms=args.delay_ms)
     finally:
         dev.close()
     print(f"wrote keymap from {args.cfg} to flash")
@@ -151,24 +151,21 @@ def cmd_effect(args):
         fizzctl effect waterfall --color ff8800
         fizzctl effect static --brightness 1
     """
-    from .effects import EFFECT_ACCEPTS_COLOR, EFFECT_DEFAULTS, EFFECT_ID, encode_firmware_effect
-    from .hid import send_firmware_effect
+    from .effects import (
+        EFFECT_ACCEPTS_COLOR, EFFECT_DEFAULTS, EFFECT_ID,
+        _ALIASES, encode_firmware_effect, parse_color,
+    )
 
-    name = args.name
-    if name is None:
+    name = _ALIASES.get(args.name, args.name)
+    if name is None or name not in EFFECT_ID:
+        if name is not None:
+            print(f"unknown effect {name!r}")
         print("Firmware effects (22). Run like:  fizzctl effect rainbow --speed 2 --brightness 4")
         for n, eid in EFFECT_ID.items():
             defs = EFFECT_DEFAULTS[n]
             color = "yes" if n in EFFECT_ACCEPTS_COLOR else "-"
             print(f"  {n:18s} id={eid:#04x} color:{color:3s} default sb={defs[0]}.{defs[1]}")
-        return 0
-    if name not in EFFECT_ID:
-        print(f"unknown effect {name!r}. Available ({', '.join(EFFECT_ID)}):")
-        for n, eid in EFFECT_ID.items():
-            defs = EFFECT_DEFAULTS[n]
-            color = "yes" if n in EFFECT_ACCEPTS_COLOR else "-"
-            print(f"  {n:18s} id={eid:#04x} color:{color:3s} default sb={defs[0]}.{defs[1]}")
-        return 1
+        return 0 if name is None else 1
 
     color = None
     if args.color:
@@ -185,7 +182,7 @@ def cmd_effect(args):
     if dev is None:
         return 1
     try:
-        send_firmware_effect(dev, frames)
+        send_burst(dev, frames)
     finally:
         dev.close()
     desc = f"effect {name}"
@@ -198,38 +195,17 @@ def cmd_effect(args):
 
 
 def cmd_key(args):
-    """Paint a single key via the CANVAS + 5AA5 execute path (flash write),
-    persistent across reboots."""
-    from .hid import rgb_sequence, send_rgb
-    from .protocol import NAME_TO_INDEX
-
-    color = parse_color(args.color)
-    if color is None:
-        print(f"bad color {args.color!r}")
-        return 1
-    if args.key not in NAME_TO_INDEX:
-        print(f"unknown key {args.key!r}. Available: {', '.join(sorted(NAME_TO_INDEX))}")
-        return 1
-    frames = rgb_sequence({args.key: color})
-    try:
-        dev = open_device(debug=args.debug)
-    except NoDeviceError:
-        return 1
-    if dev is None:
-        return 1
-    try:
-        send_rgb(dev, frames)
-        print(f"painted {args.key} -> #{color[0]:02x}{color[1]:02x}{color[2]:02x}")
-    finally:
-        dev.close()
-    return 0
+    """Paint a single key (`key W red` == `paint W=red`)."""
+    args.specs = [f"{args.key}={args.color}"]
+    return cmd_paint(args)
 
 
 def cmd_paint(args):
     """Paint many keys via the CANVAS + 5AA5 execute path (flash write):
     fizzctl paint W=ff0000 A=00ff00 S=0000ff D=ffffff
     """
-    from .hid import rgb_sequence, send_rgb
+    from .effects import parse_color
+    from .hid import rgb_sequence
     from .protocol import NAME_TO_INDEX
 
     colors = {}
@@ -237,7 +213,7 @@ def cmd_paint(args):
         if "=" not in spec:
             print(f"bad spec {spec!r}: expected KEY=COLOR")
             return 1
-        key, c = spec.split("=", 1)
+        key, c = spec.rsplit("=", 1)
         if key not in NAME_TO_INDEX:
             print(f"unknown key {key!r}")
             return 1
@@ -254,23 +230,11 @@ def cmd_paint(args):
     if dev is None:
         return 1
     try:
-        send_rgb(dev, frames)
-        print(f"painted {len(colors)} keys")
+        send_burst(dev, frames)
+        print(f"painted {len(colors)} key{'s' if len(colors) != 1 else ''}")
     finally:
         dev.close()
     return 0
-
-
-def parse_color(s: str) -> tuple[int, int, int] | None:
-    from .effects import parse_color as _pc
-
-    return _pc(s)
-
-
-def _kind(frame: bytes) -> str:
-    from .protocol import frame_kind
-
-    return frame_kind(frame)
 
 
 def _build_parser(dev: bool) -> argparse.ArgumentParser:

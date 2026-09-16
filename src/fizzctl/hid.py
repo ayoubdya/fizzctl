@@ -16,7 +16,7 @@ import time
 
 import hid
 
-from .protocol import PID, VID
+from .protocol import PID, VID, frame_kind
 
 
 class NoDeviceError(Exception):
@@ -100,17 +100,6 @@ class K617:
         raw = self._dev.get_feature_report(report_id, size)
         return bytes(raw) if raw is not None else bytes(size)
 
-    def send_sequence(self, frames: list[bytes], delay_ms: int = 30) -> None:
-        """Send a list of frames sequentially (init -> data -> commit)."""
-        from time import sleep
-
-        for i, frame in enumerate(frames):
-            kind = _kind(frame)
-            self.send_feature(frame)
-            if self.debug:
-                print(f"  [{i + 1}/{len(frames)}] {kind}")
-            sleep(delay_ms / 1000)
-
     def close(self) -> None:
         if self._dev is not None:
             try:
@@ -161,12 +150,6 @@ def open_device(debug: bool = False) -> K617 | None:
         return None
 
 
-def _kind(frame: bytes) -> str:
-    from .protocol import frame_kind
-
-    return frame_kind(frame)
-
-
 def rgb_sequence(led_colors: dict[int, tuple[int, int, int]]) -> list[bytes]:
     """Build the RGB-write payloads: [INIT, P1(no SEC yet), P2, EXEC].
 
@@ -175,7 +158,7 @@ def rgb_sequence(led_colors: dict[int, tuple[int, int, int]]) -> list[bytes]:
 
     NOTE: the EXEC frame commits to flash (5AA5 magic). Do not loop this.
     """
-    from .blobs import RGB_EXEC, RGB_INIT, RGB_SEC
+    from .blobs import INIT, RGB_EXEC, RGB_SEC
     from .protocol import NAME_TO_INDEX, RESTORE_CONSTANT_FRAMES, set_key_color
 
     canvas = bytearray(1032)
@@ -186,68 +169,29 @@ def rgb_sequence(led_colors: dict[int, tuple[int, int, int]]) -> list[bytes]:
         set_key_color(canvas, idx, rgb)
     canvas[660:660 + len(RGB_SEC)] = RGB_SEC
     p2 = RESTORE_CONSTANT_FRAMES[2]  # routing, never modify
-    return [bytes(RGB_INIT), bytes(canvas), p2, RGB_EXEC]
+    return [bytes(INIT), bytes(canvas), p2, RGB_EXEC]
 
 
-def rgb_all(color: tuple[int, int, int]) -> list[bytes]:
-    from .protocol import LED_INDEX
+def send_burst(dev: K617, frames: list[bytes], handshake: bool = True,
+               delay_ms: int = 60) -> None:
+    """Send an RGB write burst: INIT -> [mandatory GET handshake] -> blocks.
 
-    return rgb_sequence({idx: color for idx in LED_INDEX})
-
-
-def send_rgb(dev: K617, frames: list[bytes]) -> None:
-    """Send the RGB sequence WITH the mandatory GET_REPORT handshake.
-
-    Protocol: INIT -> GET (handshake) -> P1 -> P2 -> EXEC.
-    Without the handshake the firmware silently ignores the writes.
+    ``handshake=True`` (rgb/effect/key/paint): the firmware ignores the burst
+    unless we poll GET_REPORT(0x06, 1032) after INIT.  ``handshake=False``
+    (keymap/replay) skips it.
     """
     from time import sleep
 
-    init, canvas, p2, exec_ = frames
-    dev.send_feature(init)
-    if dev.debug:
-        print("  [1/4] INIT")
-    sleep(0.06)
-    resp = dev.get_feature(0x06, 1032)  # mandatory handshake
-    if dev.debug:
-        print(f"  [handshake] get_feature(0x06, 1032) -> {len(resp)}B")
-    sleep(0.06)
-    dev.send_feature(canvas)
-    if dev.debug:
-        print("  [2/4] CANVAS")
-    sleep(0.06)
-    dev.send_feature(p2)
-    if dev.debug:
-        print("  [3/4] ROUTING")
-    sleep(0.06)
-    dev.send_feature(exec_)
-    if dev.debug:
-        print("  [4/4] EXEC")
-
-
-# firmware effects + per-key paint (see fizzctl.effects)
-def send_firmware_effect(dev: K617, frames: list[bytes]) -> None:
-    """Send the 5-frame firmware-effect burst WITH the mandatory handshake.
-
-    Protocol: INIT -> GET (handshake) -> MODE -> CANVAS -> ROUTING -> EXEC.
-    The EXEC block commits the effect selection to flash (5AA5 magic).
-    """
-    from time import sleep
-
-    init, *blocks = frames
-    dev.send_feature(init)
-    if dev.debug:
-        print("  [1/5] INIT")
-    sleep(0.06)
-    resp = dev.get_feature(0x06, 1032)  # mandatory handshake
-    if dev.debug:
-        print(f"  [handshake] get_feature(0x06, 1032) -> {len(resp)}B")
-    sleep(0.06)
-    for i, block in enumerate(blocks, start=2):
-        dev.send_feature(block)
+    for i, frame in enumerate(frames, start=1):
+        dev.send_feature(frame)
         if dev.debug:
-            print(f"  [{i}/5] {_kind(block)}")
-        sleep(0.06)
+            print(f"  [{i}/{len(frames)}] {frame_kind(frame)}")
+        sleep(delay_ms / 1000)
+        if handshake and i == 1:
+            resp = dev.get_feature(0x06, 1032)
+            if dev.debug:
+                print(f"  [handshake] get_feature(0x06, 1032) -> {len(resp)}B")
+            sleep(delay_ms / 1000)
 
 
 def send_per_key(dev: K617, frame: bytes) -> None:

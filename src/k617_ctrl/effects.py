@@ -181,11 +181,28 @@ def encode_per_key_solid(color: tuple[int, int, int]) -> bytes:
 
 def parse_color(s: str) -> tuple[int, int, int] | None:
     """Parse a color name or hex string into (r, g, b)."""
-    named = {"red": (255, 0, 0), "green": (0, 255, 0), "blue": (0, 0, 255),
-             "white": (255, 255, 255), "off": (0, 0, 0), "black": (0, 0, 0)}
+    named = {
+        # primary
+        "red": (255, 0, 0), "green": (0, 255, 0), "blue": (0, 0, 255),
+        # secondary
+        "yellow": (255, 255, 0), "cyan": (0, 255, 255), "magenta": (255, 0, 255),
+        "purple": (128, 0, 255), "orange": (255, 165, 0), "pink": (255, 105, 180),
+        "lime": (191, 255, 0), "teal": (0, 128, 128), "violet": (238, 130, 238),
+        "brown": (165, 42, 42), "gold": (255, 215, 0), "silver": (192, 192, 192),
+        "gray": (128, 128, 128), "grey": (128, 128, 128),
+        "navy": (0, 0, 128), "maroon": (128, 0, 0), "olive": (128, 128, 0),
+        "coral": (255, 127, 80), "indigo": (75, 0, 130), "salmon": (250, 128, 114),
+        # light / shades
+        "lightred": (255, 102, 102), "lightgreen": (144, 238, 144),
+        "lightblue": (173, 216, 230),
+        "darkred": (139, 0, 0), "darkgreen": (0, 100, 0), "darkblue": (0, 0, 139),
+        # neutral
+        "white": (255, 255, 255), "off": (0, 0, 0), "black": (0, 0, 0),
+    }
     s = s.strip().lstrip("#")
-    if s.lower() in named:
-        return named[s.lower()]
+    key = s.lower().replace("_", "").replace("-", "").replace(" ", "")
+    if key in named:
+        return named[key]
     if len(s) == 6:
         try:
             return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))

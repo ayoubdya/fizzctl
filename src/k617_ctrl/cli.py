@@ -316,14 +316,14 @@ def _build_parser(dev: bool) -> argparse.ArgumentParser:
 
     px = sub.add_parser("rgb", help="whole-board solid color (shortcut for `effect fixed-on`)")
     px.add_argument("color")
-    px.add_argument("--brightness", type=int, help="0..15 nibble")
+    px.add_argument("-b", "--brightness", type=int, help="0..15 nibble")
     px.add_argument("--dry-run", action="store_true")
 
     peff = sub.add_parser("effect", help="run a firmware-native effect (flash write)")
     peff.add_argument("name")
-    peff.add_argument("--color", help="base color (name or hex) — only for color-capable effects")
-    peff.add_argument("--speed", type=int, help="0..15 nibble")
-    peff.add_argument("--brightness", type=int, help="0..15 nibble")
+    peff.add_argument("-c", "--color", help="base color (name or hex) — only for color-capable effects")
+    peff.add_argument("-s", "--speed", type=int, help="0..15 nibble")
+    peff.add_argument("-b", "--brightness", type=int, help="0..15 nibble")
     peff.add_argument("--dry-run", action="store_true")
 
     pk = sub.add_parser("key", help="paint one key via CANVAS + 5AA5 (flash write)")
@@ -337,9 +337,9 @@ def _build_parser(dev: bool) -> argparse.ArgumentParser:
 
     pa = sub.add_parser("animate", help="host-side per-key animation (volatile stream)")
     pa.add_argument("name")
-    pa.add_argument("--color", default="ff0000", help="base color (name or hex)")
-    pa.add_argument("--speed", type=float, default=1.0, help="animation speed multiplier")
-    pa.add_argument("--fps", type=int, default=30, help="frames per second")
+    pa.add_argument("-c", "--color", default="ff0000", help="base color (name or hex)")
+    pa.add_argument("-s", "--speed", type=float, default=1.0, help="animation speed multiplier")
+    pa.add_argument("-f", "--fps", type=int, default=30, help="frames per second")
     pa.add_argument("--duration", type=float, help="stop after N seconds (default: until Ctrl+C)")
 
     prs = sub.add_parser("restore", help="build+sends full Restore sequence from Cfg.ini (flash write)")

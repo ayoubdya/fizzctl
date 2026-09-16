@@ -7,7 +7,7 @@ MrSchrodingers/fizz-rgb project.  Two independent protocols:
   by patching a few bytes:
       MODE[29..31]  = base color (R,G,B)
       EXEC[21]      = effect_id (selects rainbow/snake/wheel/...)
-      EXEC[69],[71] = packed nibbles (high=speed, low=brightness)
+      EXEC[39]      = packed nibbles (high=speed, low=brightness)
   Sending requires the mandatory GET_REPORT(0x06, 1032) handshake after INIT
   (without it the firmware silently ignores the burst).
 

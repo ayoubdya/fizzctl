@@ -17,10 +17,16 @@ pip install dist/*.whl
 ### Udev rules (needs one `sudo`)
 
 ```bash
-sudo k617-ctrl setup-udev
+k617-ctrl setup-udev
 ```
 
-Unplug and replug the keyboard afterwards.
+This installs `99-k617.rules` to `/etc/udev/rules.d/`, reloads udev and
+re-triggers device events. The command elevates its own privileged steps
+via `sudo` (you are prompted for your password), so you do **not** need to
+wrap it as `sudo k617-ctrl ...` — that fails because the binary lives in a
+user-local path like `~/.local/bin`. `--dry-run` prints what would be
+written without touching the system. Unplug/replug the keyboard afterwards if
+the trigger did not pick it up.
 
 ## Commands
 
@@ -38,7 +44,7 @@ Unplug and replug the keyboard afterwards.
 ### Set the whole board to one color
 
 ```bash
-k617-ctrl rgb ff0000          # red
+k617-ctrl rgb red
 k617-ctrl rgb 00ff00 --brightness 4
 ```
 

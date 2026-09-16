@@ -6,12 +6,15 @@ and restoring keymaps from `Cfg.ini` files.
 ## Install
 
 ```bash
-# from source
-uv build
-uv tool install .
+# from PyPI
+pip install fizzctl
 
-# or directly
-pip install dist/*.whl
+# from PyPI (uv)
+uv tool install fizzctl
+
+# from source
+git clone https://github.com/you/fizzctl.git && cd fizzctl
+uv build && uv tool install .
 ```
 
 ### Udev rules (needs one `sudo`)
@@ -24,8 +27,7 @@ This installs `99-k617.rules` to `/etc/udev/rules.d/`, reloads udev and
 re-triggers device events. The command elevates its own privileged steps
 via `sudo` (you are prompted for your password), so you do **not** need to
 wrap it as `sudo fizzctl ...` — that fails because the binary lives in a
-user-local path like `~/.local/bin`. `--dry-run` prints what would be
-written without touching the system. Unplug/replug the keyboard afterwards if
+user-local path like `~/.local/bin`. Unplug/replug the keyboard afterwards if
 the trigger did not pick it up.
 
 ## Commands
@@ -48,6 +50,15 @@ All commands accept short flag aliases alongside their long forms:
 | `--speed` | `-s` | `effect`, `animate` |
 | `--brightness` | `-b` | `effect`, `rgb` |
 | `--fps` | `-f` | `animate` |
+
+### Write keymap (most important)
+
+Apply the full keymap (bindings, lighting zones, function keys) from a
+`Cfg.ini` — the file the official Redragon software exports:
+
+```bash
+fizzctl keymap Cfg.ini
+```
 
 ### Set the whole board to one color
 
@@ -97,14 +108,6 @@ fizzctl animate chase --color ff0000 --speed 2  # or: -c yellow -s 2
 fizzctl animate solid --color 0000ff
 ```
 
-### Write keymap
-
-Write a full keymap from a `Cfg.ini` to flash:
-
-```bash
-fizzctl keymap Cfg.ini
-```
-
 ### Debug mode
 
 ```bash
@@ -122,7 +125,7 @@ The `fizzctl-dev` binary exposes the full reverse-engineering toolkit
 fizzctl-dev inspect captures/r3.json
 fizzctl-dev diff captures/r2.json captures/r3.json
 fizzctl-dev export captures/r2.json frames.json
-fizzctl-dev replay frames.json --dry-run
+fizzctl-dev replay frames.json
 fizzctl-dev cfg Cfg.ini
 fizzctl-dev list
 ```

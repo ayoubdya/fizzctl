@@ -32,12 +32,9 @@ def udev_rules_installed() -> bool:
 
 
 class K617:
-    def __init__(self, dry_run: bool = False, debug: bool = False):
-        self.dry_run = dry_run
+    def __init__(self, debug: bool = False):
         self.debug = debug
-        self._dev = None
-        if not dry_run:
-            self._dev = self._open()
+        self._dev = self._open()
 
     @staticmethod
     def _open():
@@ -96,18 +93,10 @@ class K617:
 
     def send_feature(self, data: bytes) -> None:
         """Send an arbitrary feature report (bytes includes the report ID)."""
-        if self.dry_run:
-            if self.debug:
-                print(f"[dry-run] send_feature({len(data)}B): {data[:16].hex(' ')}...")
-            return
         self._dev.send_feature_report(data)
 
     def get_feature(self, report_id: int, size: int) -> bytes:
         """Read a feature report (returns exactly `size` bytes on success)."""
-        if self.dry_run:
-            if self.debug:
-                print(f"[dry-run] get_feature(report_id={report_id:#04x}, size={size})")
-            return bytes(size)
         raw = self._dev.get_feature_report(report_id, size)
         return bytes(raw) if raw is not None else bytes(size)
 
@@ -130,7 +119,7 @@ class K617:
                 pass
 
 
-def open_device(dry_run: bool = False, debug: bool = False) -> K617 | None:
+def open_device(debug: bool = False) -> K617 | None:
     """Open the K617, prompting to install udev rules when access is denied.
 
     Returns the device, or None if it could not be opened (the reason is
@@ -140,7 +129,7 @@ def open_device(dry_run: bool = False, debug: bool = False) -> K617 | None:
     from .udev_rules import install_udev_rules
 
     try:
-        return K617(dry_run=dry_run, debug=debug)
+        return K617(debug=debug)
     except UdevRequiredError as e:
         print(f"Trouble opening your K617: {e}")
         try:
@@ -160,7 +149,7 @@ def open_device(dry_run: bool = False, debug: bool = False) -> K617 | None:
         last_err = None
         for _ in range(8):           # udev permission changes settle slowly
             try:
-                return K617(dry_run=dry_run, debug=debug)
+                return K617(debug=debug)
             except NoDeviceError as e2:
                 last_err = e2
                 time.sleep(1.0)
@@ -263,8 +252,4 @@ def send_firmware_effect(dev: K617, frames: list[bytes]) -> None:
 
 def send_per_key(dev: K617, frame: bytes) -> None:
     """Send a single 382-byte per-key report (no handshake needed)."""
-    if dev.dry_run:
-        if dev.debug:
-            print(f"[dry-run] send_per_key({len(frame)}B): {frame[:16].hex(' ')}...")
-        return
     dev._dev.send_feature_report(frame)

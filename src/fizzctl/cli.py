@@ -15,7 +15,7 @@ Dev commands (``fizzctl-dev``, reverse-engineering toolkit):
     fizzctl-dev inspect <cap.json>
     fizzctl-dev diff <capA.json> <capB.json>
     fizzctl-dev export <cap.json> <frames.json>
-    fizzctl-dev replay <frames.json> [--dry-run] [--delay-ms N]
+    fizzctl-dev replay <frames.json> [--delay-ms N]
     plus every user command above
 """
 from __future__ import annotations
@@ -85,7 +85,7 @@ def cmd_replay(args):
         from .protocol import frame_kind
         print(f"  {i}: {frame_kind(f)} ({len(f)}B)")
     try:
-        dev = open_device(dry_run=args.dry_run, debug=args.debug)
+        dev = open_device(debug=args.debug)
     except NoDeviceError:
         return 1
     if dev is None:
@@ -116,13 +116,6 @@ def cmd_keymap(args):
     if len(keymap) != 1032:
         print("error: keymap block is not 1032 bytes")
         return 1
-    if args.dry_run:
-        if args.debug:
-            for i, f in enumerate(frames):
-                print(f"  [{i + 1}/{len(frames)}] {_kind(f)} ({len(f)}B)")
-        else:
-            print(f"[dry-run] would write keymap from {args.cfg}")
-        return 0
     try:
         dev = open_device(debug=args.debug)
     except NoDeviceError:
@@ -185,13 +178,6 @@ def cmd_effect(args):
             return 1
 
     frames = encode_firmware_effect(name, color, speed=args.speed, brightness=args.brightness)
-    if args.dry_run:
-        if args.debug:
-            for i, f in enumerate(frames):
-                print(f"  [{i + 1}/5] {_kind(f)} ({len(f)}B)")
-        else:
-            print(f"[dry-run] would apply effect {name!r}")
-        return 0
     try:
         dev = open_device(debug=args.debug)
     except NoDeviceError:
@@ -225,12 +211,6 @@ def cmd_key(args):
         print(f"unknown key {args.key!r}. Available: {', '.join(sorted(NAME_TO_INDEX))}")
         return 1
     frames = rgb_sequence({args.key: color})
-    if args.dry_run:
-        if args.debug:
-            print(f"[dry-run] {len(frames)} frames, would paint {args.key} -> {color}")
-        else:
-            print(f"[dry-run] would paint {args.key} -> {color}")
-        return 0
     try:
         dev = open_device(debug=args.debug)
     except NoDeviceError:
@@ -267,12 +247,6 @@ def cmd_paint(args):
             return 1
         colors[key] = color
     frames = rgb_sequence(colors)
-    if args.dry_run:
-        if args.debug:
-            print(f"[dry-run] {len(frames)} frames, would paint {len(colors)} keys -> {colors}")
-        else:
-            print(f"[dry-run] would paint {len(colors)} keys")
-        return 0
     try:
         dev = open_device(debug=args.debug)
     except NoDeviceError:
@@ -323,7 +297,6 @@ def _build_parser(dev: bool) -> argparse.ArgumentParser:
         pe.add_argument("out")
         pr = sub.add_parser("replay", help="replay exported frames via hidapi")
         pr.add_argument("frames")
-        pr.add_argument("--dry-run", action="store_true")
         pr.add_argument("--delay-ms", type=int, default=30)
 
     px = sub.add_parser("rgb",
@@ -337,7 +310,6 @@ Examples:
                       formatter_class=argparse.RawDescriptionHelpFormatter)
     px.add_argument("color")
     px.add_argument("-b", "--brightness", type=int, help="0..4 (level; higher = brighter)")
-    px.add_argument("--dry-run", action="store_true")
 
     peff = sub.add_parser("effect",
                           help="run a firmware-native effect (flash write); run without a name to list all",
@@ -354,7 +326,6 @@ Examples:
     peff.add_argument("-c", "--color", help="base color (name or hex) — only for color-capable effects")
     peff.add_argument("-s", "--speed", type=int, help="0..4 (level; higher = faster)")
     peff.add_argument("-b", "--brightness", type=int, help="0..4 (level; higher = brighter)")
-    peff.add_argument("--dry-run", action="store_true")
 
     pk = sub.add_parser("key",
                         help="paint one key: key W red (flash write)",
@@ -362,12 +333,10 @@ Examples:
 Examples:
   fizzctl key W ff0000
   fizzctl key A yellow
-  fizzctl key Space white --dry-run
 """.rstrip(),
                         formatter_class=argparse.RawDescriptionHelpFormatter)
     pk.add_argument("key")
     pk.add_argument("color")
-    pk.add_argument("--dry-run", action="store_true")
 
     pp = sub.add_parser("paint",
                         help="paint many keys: paint W=ff0000 A=00ff00 (flash write)",
@@ -375,11 +344,9 @@ Examples:
 Examples:
   fizzctl paint W=ff0000 A=00ff00 S=ffff00 D=ff00ff
   fizzctl paint W=red A=orange S=yellow D=green
-  fizzctl paint W=ff0000 A=00ff00 Space=ffffff --dry-run
 """.rstrip(),
                         formatter_class=argparse.RawDescriptionHelpFormatter)
     pp.add_argument("specs", nargs="+")
-    pp.add_argument("--dry-run", action="store_true")
 
     pa = sub.add_parser("animate",
                         help="host-side per-key animation: animate chase -c red -s 2 (volatile stream)",
@@ -403,15 +370,12 @@ Examples:
                         description="""
 Examples:
   fizzctl keymap captures/cfg-runs/cfg_r2_stock.ini
-  fizzctl keymap Cfg.ini --dry-run
 """.rstrip(),
                         formatter_class=argparse.RawDescriptionHelpFormatter)
     prs.add_argument("cfg")
-    prs.add_argument("--dry-run", action="store_true")
     prs.add_argument("--delay-ms", type=int, default=30)
 
     psudev = sub.add_parser("setup-udev", help="install 99-k617.rules + reload udev (needs root)")
-    psudev.add_argument("--dry-run", action="store_true")
 
     return p
 
@@ -438,7 +402,7 @@ def main_dev() -> int:
 def cmd_setup_udev(args) -> int:
     from .udev_rules import install_udev_rules
 
-    return install_udev_rules(dry_run=args.dry_run)
+    return install_udev_rules()
 
 
 if __name__ == "__main__":

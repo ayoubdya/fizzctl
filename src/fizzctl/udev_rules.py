@@ -51,13 +51,9 @@ def _install_as_root(target: str) -> int:
     return 0
 
 
-def install_udev_rules(dry_run: bool = False) -> int:
+def install_udev_rules() -> int:
     """Install the udev rules file and reload udev (elevating via sudo)."""
     target = os.path.join(UDEV_DIR, UDEV_FILE)
-    if dry_run:
-        print(f"[dry-run] would install udev rules to {target}")
-        print(f"[dry-run] rules:\n{RULES}")
-        return 0
 
     if _is_root():
         return _install_as_root(target)

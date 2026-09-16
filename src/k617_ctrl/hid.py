@@ -21,8 +21,9 @@ class NoDeviceError(Exception):
 
 
 class K617:
-    def __init__(self, dry_run: bool = False):
+    def __init__(self, dry_run: bool = False, debug: bool = False):
         self.dry_run = dry_run
+        self.debug = debug
         self._dev = None
         if not dry_run:
             self._dev = self._open()
@@ -53,14 +54,16 @@ class K617:
     def send_feature(self, data: bytes) -> None:
         """Send an arbitrary feature report (bytes includes the report ID)."""
         if self.dry_run:
-            print(f"[dry-run] send_feature({len(data)}B): {data[:16].hex(' ')}...")
+            if self.debug:
+                print(f"[dry-run] send_feature({len(data)}B): {data[:16].hex(' ')}...")
             return
         self._dev.send_feature_report(data)
 
     def get_feature(self, report_id: int, size: int) -> bytes:
         """Read a feature report (returns exactly `size` bytes on success)."""
         if self.dry_run:
-            print(f"[dry-run] get_feature(report_id={report_id:#04x}, size={size})")
+            if self.debug:
+                print(f"[dry-run] get_feature(report_id={report_id:#04x}, size={size})")
             return bytes(size)
         raw = self._dev.get_feature_report(report_id, size)
         return bytes(raw) if raw is not None else bytes(size)
@@ -72,7 +75,8 @@ class K617:
         for i, frame in enumerate(frames):
             kind = _kind(frame)
             self.send_feature(frame)
-            print(f"  [{i + 1}/{len(frames)}] {kind}")
+            if self.debug:
+                print(f"  [{i + 1}/{len(frames)}] {kind}")
             sleep(delay_ms / 1000)
 
     def close(self) -> None:
@@ -128,19 +132,24 @@ def send_rgb(dev: K617, frames: list[bytes]) -> None:
 
     init, canvas, p2, exec_ = frames
     dev.send_feature(init)
-    print("  [1/4] INIT")
+    if dev.debug:
+        print("  [1/4] INIT")
     sleep(0.06)
     resp = dev.get_feature(0x06, 1032)  # mandatory handshake
-    print(f"  [handshake] get_feature(0x06, 1032) -> {len(resp)}B")
+    if dev.debug:
+        print(f"  [handshake] get_feature(0x06, 1032) -> {len(resp)}B")
     sleep(0.06)
     dev.send_feature(canvas)
-    print("  [2/4] CANVAS")
+    if dev.debug:
+        print("  [2/4] CANVAS")
     sleep(0.06)
     dev.send_feature(p2)
-    print("  [3/4] ROUTING")
+    if dev.debug:
+        print("  [3/4] ROUTING")
     sleep(0.06)
     dev.send_feature(exec_)
-    print("  [4/4] EXEC")
+    if dev.debug:
+        print("  [4/4] EXEC")
 
 
 # firmware effects + per-key paint (see k617_ctrl.effects)
@@ -154,20 +163,24 @@ def send_firmware_effect(dev: K617, frames: list[bytes]) -> None:
 
     init, *blocks = frames
     dev.send_feature(init)
-    print("  [1/5] INIT")
+    if dev.debug:
+        print("  [1/5] INIT")
     sleep(0.06)
     resp = dev.get_feature(0x06, 1032)  # mandatory handshake
-    print(f"  [handshake] get_feature(0x06, 1032) -> {len(resp)}B")
+    if dev.debug:
+        print(f"  [handshake] get_feature(0x06, 1032) -> {len(resp)}B")
     sleep(0.06)
     for i, block in enumerate(blocks, start=2):
         dev.send_feature(block)
-        print(f"  [{i}/5] {_kind(block)}")
+        if dev.debug:
+            print(f"  [{i}/5] {_kind(block)}")
         sleep(0.06)
 
 
 def send_per_key(dev: K617, frame: bytes) -> None:
     """Send a single 382-byte per-key report (no handshake needed)."""
     if dev.dry_run:
-        print(f"[dry-run] send_per_key({len(frame)}B): {frame[:16].hex(' ')}...")
+        if dev.debug:
+            print(f"[dry-run] send_per_key({len(frame)}B): {frame[:16].hex(' ')}...")
         return
     dev._dev.send_feature_report(frame)

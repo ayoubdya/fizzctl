@@ -14,6 +14,7 @@ dependencies = [
 
 [project.scripts]
 k617-ctrl = "k617_ctrl:main"
+k617-ctrl-dev = "k617_ctrl:main_dev"
 
 [build-system]
 requires = ["uv_build>=0.12.13,<0.13.0"]

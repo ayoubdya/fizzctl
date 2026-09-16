@@ -126,7 +126,7 @@ def cmd_animate(args):
         print(f"bad color {args.color!r}")
         return 1
     try:
-        dev = K617()
+        dev = K617(debug=getattr(args, 'debug', False))
     except NoDeviceError as e:
         print(f"error: {e}")
         return 1

@@ -1,14 +1,22 @@
 """k617-ctrl — command-line interface.
 
-Usage:
-    k617-ctrl list
-    k617-ctrl cfg <Cfg.ini>
-    k617-ctrl inspect <cap.json>
-    k617-ctrl diff <capA.json> <capB.json>
-    k617-ctrl export <cap.json> <frames.json>
-    k617-ctrl replay <frames.json> [--dry-run] [--delay-ms N]
-    k617-ctrl rgb <color>              # known-good RGB writer (FLASH WRITE!)
-    k617-ctrl restore <Cfg.ini>        # full keymap Restore sequence (FLASH WRITE!)
+User commands (``k617-ctrl``):
+    k617-ctrl rgb <color> [--brightness N]  # whole-board solid color (flash write)
+    k617-ctrl effect <name>            # firmware-native effect (FLASH WRITE)
+    k617-ctrl key <key> <color>        # paint one key (FLASH WRITE)
+    k617-ctrl paint <key>=<color>...   # paint many keys (FLASH WRITE)
+    k617-ctrl animate <name>           # host-side animation (volatile stream)
+    k617-ctrl restore <Cfg.ini>        # full keymap Restore (FLASH WRITE)
+    k617-ctrl setup-udev               # install 99-k617.rules (needs root)
+
+Dev commands (``k617-ctrl-dev``, reverse-engineering toolkit):
+    k617-ctrl-dev list
+    k617-ctrl-dev cfg <Cfg.ini>
+    k617-ctrl-dev inspect <cap.json>
+    k617-ctrl-dev diff <capA.json> <capB.json>
+    k617-ctrl-dev export <cap.json> <frames.json>
+    k617-ctrl-dev replay <frames.json> [--dry-run] [--delay-ms N]
+    plus every user command above
 """
 from __future__ import annotations
 
@@ -18,8 +26,7 @@ import sys
 from .animations import cmd_animate
 from .capture import diff_captures, export_frames, load_frames, load_tshark_json, significant
 from .cfg import CfgIni
-from .effects import encode_per_key_frame
-from .hid import K617, NoDeviceError, rgb_all, send_rgb
+from .hid import K617, NoDeviceError
 from .keymap import KeymapEncoder
 from .protocol import RESTORE_CONSTANT_FRAMES
 
@@ -78,7 +85,7 @@ def cmd_replay(args):
         from .protocol import frame_kind
         print(f"  {i}: {frame_kind(f)} ({len(f)}B)")
     try:
-        dev = K617(dry_run=args.dry_run)
+        dev = K617(dry_run=args.dry_run, debug=args.debug)
     except NoDeviceError as e:
         print(f"error: {e}")
         return 1
@@ -102,18 +109,21 @@ def cmd_restore(args):
         keymap,                               # 06 04 d4 keymap block
         RESTORE_CONSTANT_FRAMES[3],          # EXEC (5AA5 commit)
     ]
-    print(f"built {len(frames)} frames from {args.cfg}")
-    print(f"  keymap block: {len(keymap)}B, must equal 1032")
+    if args.debug:
+        print(f"built {len(frames)} frames from {args.cfg}")
+        print(f"  keymap block: {len(keymap)}B, must equal 1032")
     if len(keymap) != 1032:
         print("error: keymap block is not 1032 bytes")
         return 1
-    if not args.dry_run:
-        print("warning: commits keymap to flash (5AA5). Continue? y/N")
-        if input().strip().lower() != "y":
-            print("aborted")
-            return 0
+    if args.dry_run:
+        if args.debug:
+            for i, f in enumerate(frames):
+                print(f"  [{i + 1}/{len(frames)}] {_kind(f)} ({len(f)}B)")
+        else:
+            print(f"[dry-run] would restore keymap from {args.cfg}")
+        return 0
     try:
-        dev = K617(dry_run=args.dry_run)
+        dev = K617(debug=args.debug)
     except NoDeviceError as e:
         print(f"error: {e}")
         return 1
@@ -121,34 +131,24 @@ def cmd_restore(args):
         dev.send_sequence(frames, delay_ms=args.delay_ms)
     finally:
         dev.close()
+    print(f"restored keymap from {args.cfg}")
     return 0
 
 
 def cmd_rgb(args):
-    from .protocol import LED_INDEX
+    """Shortcut for `effect fixed-on <color>` (whole-board solid color).
 
-    color = parse_color(args.color)
-    if color is None:
-        print("bad color: use a name or hex")
-        return 1
-    print("warning: this COMMITS TO FLASH (5AA5). Continue? y/N")
-    if input().strip().lower() != "y":
-        print("aborted")
-        return 0
-    try:
-        dev = K617()
-    except NoDeviceError as e:
-        print(f"error: {e}")
-        return 1
-    try:
-        send_rgb(dev, rgb_all(color))
-    finally:
-        dev.close()
-    return 0
+    Examples:
+        k617-ctrl rgb ff0000
+        k617-ctrl rgb 00ff00 --brightness 4
+    """
+    args.name = "fixed-on"
+    args.speed = None
+    return cmd_effect(args)
 
 
 def cmd_effect(args):
-    """Run one of the 8 firmware-native effects (flash write).
+    """Run a firmware-native effect (flash write).
 
     Examples:
         k617-ctrl effect rainbow                 # default speed/brightness
@@ -175,25 +175,29 @@ def cmd_effect(args):
             print(f"bad color {args.color!r}: use a name or hex")
             return 1
 
-    if not args.dry_run:
-        print("warning: this COMMITS TO FLASH (5AA5). Continue? y/N")
-        if input().strip().lower() != "y":
-            print("aborted")
-            return 0
+    frames = encode_firmware_effect(name, color, speed=args.speed, brightness=args.brightness)
+    if args.dry_run:
+        if args.debug:
+            for i, f in enumerate(frames):
+                print(f"  [{i + 1}/5] {_kind(f)} ({len(f)}B)")
+        else:
+            print(f"[dry-run] would apply effect {name!r}")
+        return 0
     try:
-        dev = K617(dry_run=args.dry_run)
+        dev = K617(debug=args.debug)
     except NoDeviceError as e:
         print(f"error: {e}")
         return 1
     try:
-        frames = encode_firmware_effect(name, color, speed=args.speed, brightness=args.brightness)
-        if args.dry_run:
-            for i, f in enumerate(frames):
-                print(f"  [{i + 1}/5] {_kind(f)} ({len(f)}B)")
-        else:
-            send_firmware_effect(dev, frames)
+        send_firmware_effect(dev, frames)
     finally:
         dev.close()
+    desc = f"effect {name}"
+    if color:
+        desc += f" (color=#{color[0]:02x}{color[1]:02x}{color[2]:02x})"
+    if args.speed is not None or args.brightness is not None:
+        desc += f" (speed={args.speed}, brightness={args.brightness})"
+    print(f"applied {desc}")
     return 0
 
 
@@ -210,23 +214,21 @@ def cmd_key(args):
     if args.key not in NAME_TO_INDEX:
         print(f"unknown key {args.key!r}. Available: {', '.join(sorted(NAME_TO_INDEX))}")
         return 1
-    if not args.dry_run:
-        print("warning: commits to flash (5AA5). Continue? y/N")
-        if input().strip().lower() != "y":
-            print("aborted")
-            return 0
     frames = rgb_sequence({args.key: color})
+    if args.dry_run:
+        if args.debug:
+            print(f"[dry-run] {len(frames)} frames, would paint {args.key} -> {color}")
+        else:
+            print(f"[dry-run] would paint {args.key} -> {color}")
+        return 0
     try:
-        dev = K617(dry_run=args.dry_run)
+        dev = K617(debug=args.debug)
     except NoDeviceError as e:
         print(f"error: {e}")
         return 1
     try:
-        if args.dry_run:
-            print(f"[dry-run] {len(frames)} frames, would paint {args.key} -> {color}")
-        else:
-            send_rgb(dev, frames)
-            print(f"painted {args.key} -> {color}")
+        send_rgb(dev, frames)
+        print(f"painted {args.key} -> #{color[0]:02x}{color[1]:02x}{color[2]:02x}")
     finally:
         dev.close()
     return 0
@@ -253,23 +255,21 @@ def cmd_paint(args):
             print(f"bad color {c!r}")
             return 1
         colors[key] = color
-    if not args.dry_run:
-        print("warning: commits to flash (5AA5). Continue? y/N")
-        if input().strip().lower() != "y":
-            print("aborted")
-            return 0
     frames = rgb_sequence(colors)
+    if args.dry_run:
+        if args.debug:
+            print(f"[dry-run] {len(frames)} frames, would paint {len(colors)} keys -> {colors}")
+        else:
+            print(f"[dry-run] would paint {len(colors)} keys")
+        return 0
     try:
-        dev = K617(dry_run=args.dry_run)
+        dev = K617(debug=args.debug)
     except NoDeviceError as e:
         print(f"error: {e}")
         return 1
     try:
-        if args.dry_run:
-            print(f"[dry-run] {len(frames)} frames, would paint {len(colors)} keys -> {colors}")
-        else:
-            send_rgb(dev, frames)
-            print(f"painted {len(colors)} keys: {colors}")
+        send_rgb(dev, frames)
+        print(f"painted {len(colors)} keys")
     finally:
         dev.close()
     return 0
@@ -287,27 +287,37 @@ def _kind(frame: bytes) -> str:
     return frame_kind(frame)
 
 
-def main():
-    p = argparse.ArgumentParser(description="Redragon K617 reverse-engineering toolkit")
+def _build_parser(dev: bool) -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="k617-ctrl" if not dev else "k617-ctrl-dev",
+        description="Redragon K617 Fizz controller"
+        if not dev
+        else "Redragon K617 reverse-engineering toolkit (dev)",
+    )
+    p.add_argument("--debug", action="store_true", help="verbose frame-level logging")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("list", help="list K617 HID interfaces")
-    pc = sub.add_parser("cfg", help="parse and dump a Cfg.ini")
-    pc.add_argument("cfg")
-    pi = sub.add_parser("inspect", help="summarise a tshark JSON capture")
-    pi.add_argument("capture")
-    pd = sub.add_parser("diff", help="diff two tshark JSON captures")
-    pd.add_argument("a")
-    pd.add_argument("b")
-    pe = sub.add_parser("export", help="extract host->device writes to frames.json")
-    pe.add_argument("capture")
-    pe.add_argument("out")
-    pr = sub.add_parser("replay", help="replay exported frames via hidapi")
-    pr.add_argument("frames")
-    pr.add_argument("--dry-run", action="store_true")
-    pr.add_argument("--delay-ms", type=int, default=30)
-    px = sub.add_parser("rgb", help="known-good per-key RGB writer (flash write)")
+    if dev:
+        sub.add_parser("list", help="list K617 HID interfaces")
+        pc = sub.add_parser("cfg", help="parse and dump a Cfg.ini")
+        pc.add_argument("cfg")
+        pi = sub.add_parser("inspect", help="summarise a tshark JSON capture")
+        pi.add_argument("capture")
+        pd = sub.add_parser("diff", help="diff two tshark JSON captures")
+        pd.add_argument("a")
+        pd.add_argument("b")
+        pe = sub.add_parser("export", help="extract host->device writes to frames.json")
+        pe.add_argument("capture")
+        pe.add_argument("out")
+        pr = sub.add_parser("replay", help="replay exported frames via hidapi")
+        pr.add_argument("frames")
+        pr.add_argument("--dry-run", action="store_true")
+        pr.add_argument("--delay-ms", type=int, default=30)
+
+    px = sub.add_parser("rgb", help="whole-board solid color (shortcut for `effect fixed-on`)")
     px.add_argument("color")
+    px.add_argument("--brightness", type=int, help="0..15 nibble")
+    px.add_argument("--dry-run", action="store_true")
 
     peff = sub.add_parser("effect", help="run a firmware-native effect (flash write)")
     peff.add_argument("name")
@@ -337,15 +347,36 @@ def main():
     prs.add_argument("--dry-run", action="store_true")
     prs.add_argument("--delay-ms", type=int, default=30)
 
+    psudev = sub.add_parser("setup-udev", help="install 99-k617.rules + reload udev (needs root)")
+    psudev.add_argument("--dry-run", action="store_true")
+
+    return p
+
+
+def main(dev: bool = False) -> int:
+    p = _build_parser(dev)
     args = p.parse_args()
+
     fn = {
         "list": cmd_list, "cfg": cmd_cfg, "inspect": cmd_inspect,
         "diff": cmd_diff, "export": cmd_export, "replay": cmd_replay,
         "rgb": cmd_rgb, "effect": cmd_effect, "key": cmd_key,
         "paint": cmd_paint, "animate": cmd_animate, "restore": cmd_restore,
+        "setup-udev": cmd_setup_udev,
     }[args.cmd]
     return fn(args)
 
 
+def main_dev() -> int:
+    """Dev entry point: full toolkit including capture/RE tools."""
+    return main(dev=True)
+
+
+def cmd_setup_udev(args) -> int:
+    from .udev_rules import install_udev_rules
+
+    return install_udev_rules(dry_run=args.dry_run)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main_dev())

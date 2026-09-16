@@ -85,7 +85,7 @@ k617-ctrl animate solid --color 0000ff
 Write a full keymap from a `Cfg.ini` to flash:
 
 ```bash
-k617-ctrl restore ../redragon-k617-key-remap/Cfg.ini
+k617-ctrl restore Cfg.ini
 ```
 
 ### Debug mode
@@ -106,7 +106,7 @@ k617-ctrl-dev inspect captures/r3.json
 k617-ctrl-dev diff captures/r2.json captures/r3.json
 k617-ctrl-dev export captures/r2.json frames.json
 k617-ctrl-dev replay frames.json --dry-run
-k617-ctrl-dev cfg ../redragon-k617-key-remap/Cfg.ini
+k617-ctrl-dev cfg Cfg.ini
 k617-ctrl-dev list
 ```
 
@@ -121,8 +121,3 @@ turn off.
 **Animations** (`animate`) stream 382-byte per-key reports at the requested
 frame rate with no flash commit. They are host-side only and lost on
 reconnect.
-
-**LED layout:** the CANVAS uses a stride-21 layout (identical to the
-[k617-fizz](https://github.com/fizzstudio/k617-fizz) project). The per-key
-Sinodragon raster uses column-major 16×6 with three corrections found on
-this unit: `Esc=1` (not 0), `Menu=77`, `RCtrl=83`.

@@ -93,7 +93,6 @@ def _kind(frame: bytes) -> str:
     return frame_kind(frame)
 
 
-# known-good RGB sequence (from orignalbox/k617-rgb working reference)
 def rgb_sequence(led_colors: dict[int, tuple[int, int, int]]) -> list[bytes]:
     """Build the RGB-write payloads: [INIT, P1(no SEC yet), P2, EXEC].
 

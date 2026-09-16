@@ -1,7 +1,6 @@
 """Firmware-native effects and the Sinodragon per-key protocol.
 
-Reversed from OpenRGB issue #2172 USB captures and ported from the working
-MrSchrodingers/fizz-rgb project.  Two independent protocols:
+Two independent protocols:
 
 * Firmware effects — a 5-frame burst, all built from the fw-static template
   by patching a few bytes:
@@ -15,8 +14,8 @@ MrSchrodingers/fizz-rgb project.  Two independent protocols:
   96 RGB triplets in a 16-col x 6-row column-major raster (pos = col*6+row).
   No handshake, no flash commit, host-side (volatile) — bytes are re-applied
   every frame for animations.  Verified on hardware: Esc=1, Menu=77, RCtrl=83
-  (the upstream fizz-rgb mapping had Esc=0/Menu=65/RCtrl=71 wrong for this
-  unit).
+  (an earlier mapping had Esc=0/Menu=65/RCtrl=71, which lands on dead
+  positions).
 """
 from __future__ import annotations
 
@@ -32,7 +31,7 @@ from .protocol import base_frames
 
 # Official Redragon software effect menu (order from K617 software).
 # The effect id byte at EXEC[21] equals the 1-indexed position in that menu:
-# 8 independently-captured effects (fizz-rgb / OpenRGB #2172) all land exactly
+# 8 independently-captured effects all land exactly
 # on their menu position (Fixed_on=0x01, Rainbow=0x03, ... Blossom=0x11), so
 # the un-captured ids are inferred by position and marked ``pending-live-verify``.
 # ``name`` is the canonical slug; ``aliases`` keep old short names working.
@@ -111,8 +110,8 @@ def encode_firmware_effect(
 
     # Byte 39 is the active speed×brightness slot (high nibble = speed 1..4,
     # low nibble = brightness 1..4).  Verified by diffing USB captures —
-    # previously bytes 69/71 were patched (from the fizz-rgb template index
-    # which uses a different byte layout); those are ignored by this firmware.
+    # previously bytes 69/71 were patched (a different byte layout); those
+    # are ignored by this firmware.
     target_speed = speed if speed is not None else defaults[0]
     target_bright = brightness if brightness is not None else defaults[1]
     new_speed = max(0, min(15, round(target_speed)))

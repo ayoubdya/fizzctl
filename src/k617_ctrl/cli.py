@@ -203,7 +203,7 @@ def cmd_effect(args):
 
 def cmd_key(args):
     """Paint a single key via the CANVAS + 5AA5 execute path (flash write),
-    persistent across reboots. Equivalent to k617-fizz `send_colors`."""
+    persistent across reboots."""
     from .hid import rgb_sequence, send_rgb
     from .protocol import NAME_TO_INDEX
 

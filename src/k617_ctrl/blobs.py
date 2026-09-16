@@ -303,7 +303,7 @@ FW_FRAMES = [
 
 
 
-# --- RGB static-color protocol (from orignalbox/k617-rgb working reference) ---
+# --- RGB static-color protocol ---
 RGB_INIT = bytes.fromhex("0583b6000000")
 # P1 canvas is BUILT (header + split-plane colors + SEC at 660), not taken from
 # a template.  P2 routing is the same 06 09 c0 block used by the Restore

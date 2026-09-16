@@ -1,10 +1,5 @@
 """Device identity, report IDs and known-good frame knowledge for the K617 Fizz.
 
-Sources of truth (all reverse-engineered from USB captures of the OEM software):
-  * orignalbox/k617-fizz   — 5-step RGB write; INIT / P1 / P2 / EXEC
-  * MrSchrodingers/fizz-rgb — firmware-effect templates + Sinodragon 382-byte per-key
-  * This repo's docs/RE_GUIDE.md — the keymap/Restore sequence
-
 Nothing in this module talks to hardware; it's pure constants + helpers.
 """
 from __future__ import annotations

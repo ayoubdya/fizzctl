@@ -162,6 +162,13 @@ def cmd_effect(args):
     from .hid import send_firmware_effect
 
     name = args.name
+    if name is None:
+        print("Firmware effects (22). Run like:  k617-ctrl effect rainbow --speed 2 --brightness 4")
+        for n, eid in EFFECT_ID.items():
+            defs = EFFECT_DEFAULTS[n]
+            color = "yes" if n in EFFECT_ACCEPTS_COLOR else "-"
+            print(f"  {n:18s} id={eid:#04x} color:{color:3s} default sb={defs[0]}.{defs[1]}")
+        return 0
     if name not in EFFECT_ID:
         print(f"unknown effect {name!r}. Available ({', '.join(EFFECT_ID)}):")
         for n, eid in EFFECT_ID.items():
@@ -319,35 +326,86 @@ def _build_parser(dev: bool) -> argparse.ArgumentParser:
         pr.add_argument("--dry-run", action="store_true")
         pr.add_argument("--delay-ms", type=int, default=30)
 
-    px = sub.add_parser("rgb", help="whole-board solid color (shortcut for `effect fixed-on`)")
+    px = sub.add_parser("rgb",
+                      help="solid color: rgb red -b 4 (shortcut for `effect fixed-on`)",
+                      description="""
+Examples:
+  k617-ctrl rgb red
+  k617-ctrl rgb ff0000 --brightness 4
+  k617-ctrl rgb green -b 3
+""".rstrip(),
+                      formatter_class=argparse.RawDescriptionHelpFormatter)
     px.add_argument("color")
-    px.add_argument("-b", "--brightness", type=int, help="0..15 nibble")
+    px.add_argument("-b", "--brightness", type=int, help="0..4 (level; higher = brighter)")
     px.add_argument("--dry-run", action="store_true")
 
-    peff = sub.add_parser("effect", help="run a firmware-native effect (flash write)")
-    peff.add_argument("name")
+    peff = sub.add_parser("effect",
+                          help="run a firmware-native effect (flash write); run without a name to list all",
+                          description="""
+Examples:
+  k617-ctrl effect rainbow                      # defaults from stock config
+  k617-ctrl effect rainbow --speed 2 --brightness 4
+  k617-ctrl effect waterfall --color cyan
+  k617-ctrl effect                              # lists all 22 effects
+""".rstrip(),
+                          formatter_class=argparse.RawDescriptionHelpFormatter)
+    peff.add_argument("name", nargs="?",
+                      help="effect name (omit or run `effect` alone to list all)")
     peff.add_argument("-c", "--color", help="base color (name or hex) — only for color-capable effects")
-    peff.add_argument("-s", "--speed", type=int, help="0..15 nibble")
-    peff.add_argument("-b", "--brightness", type=int, help="0..15 nibble")
+    peff.add_argument("-s", "--speed", type=int, help="0..4 (level; higher = faster)")
+    peff.add_argument("-b", "--brightness", type=int, help="0..4 (level; higher = brighter)")
     peff.add_argument("--dry-run", action="store_true")
 
-    pk = sub.add_parser("key", help="paint one key via CANVAS + 5AA5 (flash write)")
+    pk = sub.add_parser("key",
+                        help="paint one key: key W red (flash write)",
+                        description="""
+Examples:
+  k617-ctrl key W ff0000
+  k617-ctrl key A yellow
+  k617-ctrl key Space white --dry-run
+""".rstrip(),
+                        formatter_class=argparse.RawDescriptionHelpFormatter)
     pk.add_argument("key")
     pk.add_argument("color")
     pk.add_argument("--dry-run", action="store_true")
 
-    pp = sub.add_parser("paint", help="paint many keys: paint W=ff0000 A=00ff00 (flash write)")
+    pp = sub.add_parser("paint",
+                        help="paint many keys: paint W=ff0000 A=00ff00 (flash write)",
+                        description="""
+Examples:
+  k617-ctrl paint W=ff0000 A=00ff00 S=ffff00 D=ff00ff
+  k617-ctrl paint W=red A=orange S=yellow D=green
+  k617-ctrl paint W=ff0000 A=00ff00 Space=ffffff --dry-run
+""".rstrip(),
+                        formatter_class=argparse.RawDescriptionHelpFormatter)
     pp.add_argument("specs", nargs="+")
     pp.add_argument("--dry-run", action="store_true")
 
-    pa = sub.add_parser("animate", help="host-side per-key animation (volatile stream)")
-    pa.add_argument("name")
+    pa = sub.add_parser("animate",
+                        help="host-side per-key animation: animate chase -c red -s 2 (volatile stream)",
+                        description="""
+Examples:
+  k617-ctrl animate rainbow --fps 30 --duration 10
+  k617-ctrl animate chase --color yellow --speed 2
+  k617-ctrl animate solid --color ff0000
+  k617-ctrl animate                                 # lists all animations
+""".rstrip(),
+                        formatter_class=argparse.RawDescriptionHelpFormatter)
+    pa.add_argument("name", nargs="?",
+                    help="animation name (omit or run `animate` alone to list all)")
     pa.add_argument("-c", "--color", default="ff0000", help="base color (name or hex)")
     pa.add_argument("-s", "--speed", type=float, default=1.0, help="animation speed multiplier")
     pa.add_argument("-f", "--fps", type=int, default=30, help="frames per second")
     pa.add_argument("--duration", type=float, help="stop after N seconds (default: until Ctrl+C)")
 
-    prs = sub.add_parser("restore", help="build+sends full Restore sequence from Cfg.ini (flash write)")
+    prs = sub.add_parser("restore",
+                        help="restore keymap from Cfg.ini: restore Cfg.ini (flash write)",
+                        description="""
+Examples:
+  k617-ctrl restore captures/cfg-runs/cfg_r2_stock.ini
+  k617-ctrl restore Cfg.ini --dry-run
+""".rstrip(),
+                        formatter_class=argparse.RawDescriptionHelpFormatter)
     prs.add_argument("cfg")
     prs.add_argument("--dry-run", action="store_true")
     prs.add_argument("--delay-ms", type=int, default=30)

@@ -118,6 +118,12 @@ def cmd_animate(args):
     from .hid import NoDeviceError, open_device
 
     anim = args.name
+    if anim is None:
+        print("Host-side animations (volatile — lost on disconnect). Run like:")
+        print("  k617-ctrl animate chase --color yellow --speed 2 --fps 30")
+        for name in ANIMATIONS:
+            print(f"  {name}")
+        return 0
     if anim not in ANIMATIONS:
         print(f"unknown animation {anim!r}. Available: {', '.join(ANIMATIONS)}")
         return 1

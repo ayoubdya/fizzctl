@@ -92,8 +92,8 @@ def encode_firmware_effect(
     effect.  Patches MODE[29..31] (color), EXEC[21] (effect_id) and
     EXEC[69]/[71] (speed|brightness nibbles) onto the fw-static baseline.
 
-    speed/brightness are 0..15 nibbles; Python ints get clamped.  A color is
-    only applied when the effect accepts one.
+    speed/brightness are 0..4 levels (clamped to a nibble); Python ints get
+    clamped.  A color is only applied when the effect accepts one.
     """
     name = _canonical(name)
     eid = EFFECT_ID[name]
@@ -108,14 +108,16 @@ def encode_firmware_effect(
 
     exec_[21] = eid
 
-    # Byte 39 is the active speed×brightness slot (high nibble = speed 1..4,
-    # low nibble = brightness 1..4).  Verified by diffing USB captures —
-    # previously bytes 69/71 were patched (a different byte layout); those
-    # are ignored by this firmware.
+    # Byte 39 is the active speed×brightness slot (high nibble = speed,
+    # low nibble = brightness).  The firmware only exposes ~5 levels per axis:
+    # defaults in stock captures are 0x33/0x44 (speed 3/4, brightness 3/4)
+    # and `off` uses 0x00, so a nibble of 4 is max and values above 4 clamp.
+    # Verified by diffing USB captures — previously bytes 69/71 were patched
+    # (a different byte layout); those are ignored by this firmware.
     target_speed = speed if speed is not None else defaults[0]
     target_bright = brightness if brightness is not None else defaults[1]
-    new_speed = max(0, min(15, round(target_speed)))
-    new_bright = max(0, min(15, round(target_bright)))
+    new_speed = max(0, min(4, round(target_speed)))
+    new_bright = max(0, min(4, round(target_bright)))
     packed = ((new_speed & 0x0F) << 4) | (new_bright & 0x0F)
     exec_[39] = packed
     # Mirror into the effect's own table slot (each entry is 2 bytes wide

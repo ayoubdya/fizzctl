@@ -59,9 +59,12 @@ k617-ctrl rgb 00ff00 --brightness 4       # or: rgb 00ff00 -b 4
 ### Firmware effects
 
 All 22 effects from the official Redragon software are supported, with full
-speed and brightness control:
+speed and brightness control. `speed` and `brightness` are 5 levels (0-4,
+matching the firmware); higher = faster / brighter. Run `k617-ctrl effect`
+with no name to list every effect:
 
 ```bash
+k617-ctrl effect
 k617-ctrl effect rainbow
 k617-ctrl effect rainbow --speed 2 --brightness 4   # or: -s 2 -b 4
 k617-ctrl effect fixed-on --color 00ff00 --brightness 3
@@ -71,8 +74,6 @@ k617-ctrl effect off
 
 Aliases are supported: `static` → `fixed-on`, `wheel` → `rainbow-wheel`,
 `snake` → `retro-snake`, `waterfall` → `colorful-waterfall`.
-
-Run `k617-ctrl effect` with no arguments to list all effects.
 
 ### Per-key painting
 
@@ -86,9 +87,11 @@ k617-ctrl paint W=ff0000 A=00ff00 S=ffff00 D=ff00ff Space=ffffff
 
 ### Host-side animations
 
-Volatile — lost when the keyboard reconnects or reboots:
+Volatile — lost when the keyboard reconnects or reboots. Run `k617-ctrl
+animate` with no name to list the animations:
 
 ```bash
+k617-ctrl animate
 k617-ctrl animate rainbow --fps 30 --duration 10  # or: -f 30
 k617-ctrl animate chase --color ff0000 --speed 2  # or: -c yellow -s 2
 k617-ctrl animate solid --color 0000ff

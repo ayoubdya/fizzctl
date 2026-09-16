@@ -26,7 +26,7 @@ import sys
 from .animations import cmd_animate
 from .capture import diff_captures, export_frames, load_frames, load_tshark_json, significant
 from .cfg import CfgIni
-from .hid import K617, NoDeviceError
+from .hid import K617, NoDeviceError, open_device
 from .keymap import KeymapEncoder
 from .protocol import RESTORE_CONSTANT_FRAMES
 
@@ -85,9 +85,10 @@ def cmd_replay(args):
         from .protocol import frame_kind
         print(f"  {i}: {frame_kind(f)} ({len(f)}B)")
     try:
-        dev = K617(dry_run=args.dry_run, debug=args.debug)
-    except NoDeviceError as e:
-        print(f"error: {e}")
+        dev = open_device(dry_run=args.dry_run, debug=args.debug)
+    except NoDeviceError:
+        return 1
+    if dev is None:
         return 1
     try:
         dev.send_sequence(frames, delay_ms=args.delay_ms)
@@ -123,9 +124,10 @@ def cmd_restore(args):
             print(f"[dry-run] would restore keymap from {args.cfg}")
         return 0
     try:
-        dev = K617(debug=args.debug)
-    except NoDeviceError as e:
-        print(f"error: {e}")
+        dev = open_device(debug=args.debug)
+    except NoDeviceError:
+        return 1
+    if dev is None:
         return 1
     try:
         dev.send_sequence(frames, delay_ms=args.delay_ms)
@@ -184,9 +186,10 @@ def cmd_effect(args):
             print(f"[dry-run] would apply effect {name!r}")
         return 0
     try:
-        dev = K617(debug=args.debug)
-    except NoDeviceError as e:
-        print(f"error: {e}")
+        dev = open_device(debug=args.debug)
+    except NoDeviceError:
+        return 1
+    if dev is None:
         return 1
     try:
         send_firmware_effect(dev, frames)
@@ -222,9 +225,10 @@ def cmd_key(args):
             print(f"[dry-run] would paint {args.key} -> {color}")
         return 0
     try:
-        dev = K617(debug=args.debug)
-    except NoDeviceError as e:
-        print(f"error: {e}")
+        dev = open_device(debug=args.debug)
+    except NoDeviceError:
+        return 1
+    if dev is None:
         return 1
     try:
         send_rgb(dev, frames)
@@ -263,9 +267,10 @@ def cmd_paint(args):
             print(f"[dry-run] would paint {len(colors)} keys")
         return 0
     try:
-        dev = K617(debug=args.debug)
-    except NoDeviceError as e:
-        print(f"error: {e}")
+        dev = open_device(debug=args.debug)
+    except NoDeviceError:
+        return 1
+    if dev is None:
         return 1
     try:
         send_rgb(dev, frames)

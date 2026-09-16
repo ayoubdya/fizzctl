@@ -11,6 +11,8 @@ transfers — the exact URBs you will see in USBPcap captures.
 """
 from __future__ import annotations
 
+import os
+
 import hid
 
 from .protocol import PID, VID
@@ -18,6 +20,14 @@ from .protocol import PID, VID
 
 class NoDeviceError(Exception):
     """The K617 vendor interface could not be found or opened."""
+
+
+class UdevRequiredError(NoDeviceError):
+    """The HID node exists but cannot be opened — udev rules are missing."""
+
+
+def udev_rules_installed() -> bool:
+    return os.path.exists("/etc/udev/rules.d/99-k617.rules")
 
 
 class K617:
@@ -30,19 +40,51 @@ class K617:
 
     @staticmethod
     def _open():
+        try:
+            uid = os.geteuid()
+        except AttributeError:
+            uid = None
         paths = []
         for d in hid.enumerate(VID, PID):
             iface = int(d.get("interface_number") or 0)
             if iface == 1:
                 paths.append(d["path"])
         if not paths:
-            raise NoDeviceError(
-                "K617 vendor interface not found. Is it plugged in? "
-                "Run: sudo udevadm control --reload && sudo udevadm trigger"
+            msg = (
+                "Could not find your K617 keyboard. Make sure it is "
+                "plugged in (and in wireless mode if it supports it), "
+                "then try again."
             )
-        dev = hid.Device(path=paths[0]) if hasattr(hid, "Device") else \
-            K617._open_ctypes(paths[0])
-        return dev
+            if uid != 0:
+                msg += (
+                    "\nIf it is plugged in, your user may lack permission "
+                    "to see it — try running `k617-ctrl setup-udev` first."
+                )
+            raise NoDeviceError(msg)
+        path = paths[0]
+        display = path.decode(errors="replace") if isinstance(path, bytes) else str(path)
+        try:
+            dev = hid.Device(path=path) if hasattr(hid, "Device") else \
+                K617._open_ctypes(path)
+            return dev
+        except Exception as e:
+            if uid != 0 and not udev_rules_installed():
+                raise UdevRequiredError(
+                    f"Found your K617 but it could not be opened ({display}). "
+                    "The udev rules that let you access the keyboard without "
+                    "sudo are not installed."
+                ) from e
+            if uid != 0:
+                raise NoDeviceError(
+                    f"Found your K617 but it could not be opened ({display}: {e}). "
+                    "Your user lacks permission to access it. Try running "
+                    "`k617-ctrl setup-udev` (or unplug/replug the keyboard), "
+                    "then rerun this command."
+                ) from e
+            raise NoDeviceError(
+                f"Found your K617 but it could not be opened ({display}: {e}). "
+                "Is another program controlling the keyboard right now?"
+            ) from e
 
     @staticmethod
     def _open_ctypes(path):
@@ -85,6 +127,43 @@ class K617:
                 self._dev.close()
             except Exception:
                 pass
+
+
+def open_device(dry_run: bool = False, debug: bool = False) -> K617 | None:
+    """Open the K617, prompting to install udev rules when access is denied.
+
+    Returns the device, or None if it could not be opened (the reason is
+    already printed). When the rules are missing the user is asked whether
+    to install them now, then the open is retried.
+    """
+    from .udev_rules import install_udev_rules
+
+    try:
+        return K617(dry_run=dry_run, debug=debug)
+    except UdevRequiredError as e:
+        print(f"Trouble opening your K617: {e}")
+        try:
+            answer = input("Install the udev rules now? [Y/n] ").strip().lower()
+        except EOFError:
+            answer = "y"
+        if answer not in ("", "y", "yes"):
+            print("Skipped. You can install them later with `k617-ctrl setup-udev`.")
+            return None
+        print("Installing udev rules (you may be asked for your password)...")
+        try:
+            install_udev_rules()
+        except Exception as ie:
+            print(f"error: could not install udev rules: {ie}")
+            return None
+        print("udev rules installed. Reopening the keyboard...")
+        try:
+            return K617(dry_run=dry_run, debug=debug)
+        except NoDeviceError as e2:
+            print(f"error: {e2}")
+            return None
+    except NoDeviceError as e:
+        print(e)
+        return None
 
 
 def _kind(frame: bytes) -> str:

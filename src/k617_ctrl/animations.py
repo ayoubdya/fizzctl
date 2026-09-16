@@ -115,7 +115,7 @@ def run_animation(dev, anim: str, color: tuple[int, int, int],
 
 def cmd_animate(args):
     """k617-ctrl animate <name> [--color HEX] [--speed N] [--fps N] [--duration S]"""
-    from .hid import K617, NoDeviceError
+    from .hid import NoDeviceError, open_device
 
     anim = args.name
     if anim not in ANIMATIONS:
@@ -126,9 +126,10 @@ def cmd_animate(args):
         print(f"bad color {args.color!r}")
         return 1
     try:
-        dev = K617(debug=getattr(args, 'debug', False))
-    except NoDeviceError as e:
-        print(f"error: {e}")
+        dev = open_device(debug=getattr(args, 'debug', False))
+    except NoDeviceError:
+        return 1
+    if dev is None:
         return 1
     try:
         print(f"streaming {anim} at {args.fps}fps (Ctrl+C to stop)...")

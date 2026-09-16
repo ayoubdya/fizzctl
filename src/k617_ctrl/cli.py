@@ -198,14 +198,24 @@ def cmd_effect(args):
 
 
 def cmd_key(args):
-    """Paint a single key (per-key protocol, host-side/volatile, no flash)."""
-    from .hid import send_per_key
+    """Paint a single key via the CANVAS + 5AA5 execute path (flash write),
+    persistent across reboots. Equivalent to k617-fizz `send_colors`."""
+    from .hid import rgb_sequence, send_rgb
+    from .protocol import NAME_TO_INDEX
 
     color = parse_color(args.color)
     if color is None:
         print(f"bad color {args.color!r}")
         return 1
-    frame = encode_per_key_frame({args.key: color})
+    if args.key not in NAME_TO_INDEX:
+        print(f"unknown key {args.key!r}. Available: {', '.join(sorted(NAME_TO_INDEX))}")
+        return 1
+    if not args.dry_run:
+        print("warning: commits to flash (5AA5). Continue? y/N")
+        if input().strip().lower() != "y":
+            print("aborted")
+            return 0
+    frames = rgb_sequence({args.key: color})
     try:
         dev = K617(dry_run=args.dry_run)
     except NoDeviceError as e:
@@ -213,9 +223,9 @@ def cmd_key(args):
         return 1
     try:
         if args.dry_run:
-            print(f"[dry-run] would paint {args.key}={color} via 382-byte report")
+            print(f"[dry-run] {len(frames)} frames, would paint {args.key} -> {color}")
         else:
-            send_per_key(dev, frame)
+            send_rgb(dev, frames)
             print(f"painted {args.key} -> {color}")
     finally:
         dev.close()
@@ -223,10 +233,11 @@ def cmd_key(args):
 
 
 def cmd_paint(args):
-    """Paint many keys in one 382-byte per-key report:
+    """Paint many keys via the CANVAS + 5AA5 execute path (flash write):
     k617-ctrl paint W=ff0000 A=00ff00 S=0000ff D=ffffff
     """
-    from .hid import send_per_key
+    from .hid import rgb_sequence, send_rgb
+    from .protocol import NAME_TO_INDEX
 
     colors = {}
     for spec in args.specs:
@@ -234,16 +245,20 @@ def cmd_paint(args):
             print(f"bad spec {spec!r}: expected KEY=COLOR")
             return 1
         key, c = spec.split("=", 1)
+        if key not in NAME_TO_INDEX:
+            print(f"unknown key {key!r}")
+            return 1
         color = parse_color(c)
         if color is None:
             print(f"bad color {c!r}")
             return 1
         colors[key] = color
-    try:
-        frame = encode_per_key_frame(colors)
-    except KeyError as e:
-        print(f"error: {e}")
-        return 1
+    if not args.dry_run:
+        print("warning: commits to flash (5AA5). Continue? y/N")
+        if input().strip().lower() != "y":
+            print("aborted")
+            return 0
+    frames = rgb_sequence(colors)
     try:
         dev = K617(dry_run=args.dry_run)
     except NoDeviceError as e:
@@ -251,9 +266,9 @@ def cmd_paint(args):
         return 1
     try:
         if args.dry_run:
-            print(f"[dry-run] paint {len(colors)} keys -> {colors}")
+            print(f"[dry-run] {len(frames)} frames, would paint {len(colors)} keys -> {colors}")
         else:
-            send_per_key(dev, frame)
+            send_rgb(dev, frames)
             print(f"painted {len(colors)} keys: {colors}")
     finally:
         dev.close()
@@ -301,12 +316,12 @@ def main():
     peff.add_argument("--brightness", type=int, help="0..15 nibble")
     peff.add_argument("--dry-run", action="store_true")
 
-    pk = sub.add_parser("key", help="paint one key via the per-key report (volatile)")
+    pk = sub.add_parser("key", help="paint one key via CANVAS + 5AA5 (flash write)")
     pk.add_argument("key")
     pk.add_argument("color")
     pk.add_argument("--dry-run", action="store_true")
 
-    pp = sub.add_parser("paint", help="paint many keys: paint W=ff0000 A=00ff00 (volatile)")
+    pp = sub.add_parser("paint", help="paint many keys: paint W=ff0000 A=00ff00 (flash write)")
     pp.add_argument("specs", nargs="+")
     pp.add_argument("--dry-run", action="store_true")
 

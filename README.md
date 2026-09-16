@@ -10,7 +10,7 @@ vendor HID interface (`258a:0049`, interface 1, usage page `0xFF00`).
 | Per-key RGB write (5-frame flash-commit protocol) | ✅ working reference |
 | 22 firmware-native effects (matching official software) w/ speed+brightness | ✅ working |
 | Host-side per-key animations (solid/blink/pulse/chase/wave/rainbow/drop) | ✅ working |
-| Per-key painting (single key or many) via 382-byte report | ✅ working |
+| Per-key painting (single key or many) via CANVAS + 5AA5 flash commit | ✅ working |
 | Cfg.ini parser (`[OPT]`/`[FN]`/`[KEY]`) | ✅ working |
 | USB capture inspect / one-key-change diff | ✅ working |
 | Capture-to-frames export + dry-run replay | ✅ working |
@@ -65,8 +65,10 @@ uv run k617-ctrl effect fixed-on --color 00ff00 --brightness 3
 # or using aliases:
 uv run k617-ctrl effect static   --color 00ff00 --brightness 3
 
-# Per-key painting (volatile, does NOT survive power-off).
+# Per-key painting (flash write, persists across power-off).
 # Keys are named by the top-left legend (Esc 1 2 .. Fn) or single-char labels.
+# This is the k617-fizz `send_colors` CANVAS path: a full canvas is written,
+# so any key NOT listed turns off.
 uv run k617-ctrl key W ff0000
 uv run k617-ctrl paint W=ff0000 A=00ff00 Space=0000ff
 
@@ -81,25 +83,28 @@ uv run k617-ctrl animate chase --color ff0000 --speed 2
 printf 'y\n' | uv run k617-ctrl effect static --color ffffff --brightness 4
 ```
 
-### How the two RGB paths differ
+### How the RGB paths differ
 
-* **Firmware effects** flash 5 frames (INIT → GET_REPORT handshake → MODE →
-  CANVAS → ROUTING → EXEC) with a `5AA5` commit, like the keymap restore.
-  The 8 original templates match upstream `fizz-rgb` captures; all 22 modes
-  match the official Redragon software menu order.
-* **Per-key painting / animations** push a single 382-byte report
-  (`08 0A 7A 01` + 96 RGB triplets, 16-col × 6-row Sinodragon raster,
-  pos = col*6+row) per frame with no handshake and no flash write.
-  Required handshake (`get_feature_report(0x06, 1032)`, 262 B reply) has only
-  been observed for the flash path and the keymap restore; per-key writes work
-  without it. Send one report right after an effect commit may be dropped by
-  the device — if a paint looks off, run it again.
-* **Display reset:** keyboards with no live host stream fall back to the last
-  committed firmware effect, so a per-key paint alone leaves a blank board on
-  reboot. Commit a `static` effect to get a persistent backlight.
-* **LED layout:** the Sinodragon raster matches `fizz-rgb`, with 3 corrections
-  found on this unit: `Esc=1` (not 0 — the firmware ignores key 0), `Menu=77`
-  and `RCtrl=83` (upstream maps 65/71, which land on dead positions).
+* **Flash writes** (the `rgb`, `key`, `paint`, `effect` and `restore`
+  commands) send the 4-5 frame burst (INIT → GET_REPORT handshake →
+  [MODE] → CANVAS → ROUTING → EXEC) ending in a `5AA5` commit. Key colors are
+  patched into the CANVAS split-plane (red@260 + idx / green@134 + idx /
+  blue@8 + idx, stride-21 LED map); effects patch MODE[29..31] for color and
+  EXEC[21] for the mode id. Everything survives power-off. Any key *not* in a
+  `key`/`paint` canvas turns off — the canvas is absolute, matching
+  k617-fizz `send_colors`.
+* **Animations** (`animate`) push a single 382-byte Sinodragon report
+  (`08 0A 7A 01` + 96 RGB triplets, 16-col × 6-row raster, pos = col*6+row)
+  per frame at 30fps, with no handshake and no flash write — strictly
+  host-side and lost on the next reboot/reconnect.
+* **Display reset:** after a reboot the board falls back to the last committed
+  flash state. Once `animate` stops, the board shows the last flashed effect
+  again.
+* **LED layout:** the CANVAS LED map is the stride-21 layout from Cfg.ini
+  (identical to k617-fizz). The Sinodragon per-key raster matches `fizz-rgb`
+  with 3 corrections found on this unit: `Esc=1` (not 0 — the firmware ignores
+  key 0), `Menu=77` and `RCtrl=83` (upstream maps 65/71, which land on dead
+  positions).
 
 Or install it as a package:
 
@@ -128,10 +133,12 @@ then `sudo udevadm control --reload && sudo udevadm trigger`.
 
 ## Warnings
 
-* The `rgb`, `effect` and `restore` commands and any `replay` of a Restore
-  capture **commit to flash** (`5AA5` magic). Do not loop them. Full-flash
-  backup first: `sinowealth-kb-tool read -d redragon-k617-fizz --section full backup.hex`
-* `key` / `paint` / `animate` are RAM-only (volatile, no `5AA5`).
+* The `rgb`, `key`, `paint`, `effect` and `restore` commands and any `replay`
+  of a Restore capture **commit to flash** (`5AA5` magic). Do not loop them.
+  Full-flash backup first:
+  `sinowealth-kb-tool read -d redragon-k617-fizz --section full backup.hex`
+* `animate` is the only RAM-only path — it streams per-key reports with no
+  `5AA5` commit (see the Status table).
 * Some captures contain GET_REPORT responses (device→host). The tool only
   exports host→device SET_REPORT payloads for replay.
 * The firmware has no RAM-only path — every write is a flash write.

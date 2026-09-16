@@ -41,11 +41,19 @@ the trigger did not pick it up.
 
 ## Examples
 
+All commands accept short flag aliases alongside their long forms:
+| Long | Short | Applies to |
+|---|---|---|
+| `--color` | `-c` | `effect`, `animate` |
+| `--speed` | `-s` | `effect`, `animate` |
+| `--brightness` | `-b` | `effect`, `rgb` |
+| `--fps` | `-f` | `animate` |
+
 ### Set the whole board to one color
 
 ```bash
 k617-ctrl rgb red
-k617-ctrl rgb 00ff00 --brightness 4
+k617-ctrl rgb 00ff00 --brightness 4       # or: rgb 00ff00 -b 4
 ```
 
 ### Firmware effects
@@ -55,7 +63,7 @@ speed and brightness control:
 
 ```bash
 k617-ctrl effect rainbow
-k617-ctrl effect rainbow --speed 2 --brightness 4
+k617-ctrl effect rainbow --speed 2 --brightness 4   # or: -s 2 -b 4
 k617-ctrl effect fixed-on --color 00ff00 --brightness 3
 k617-ctrl effect snake --color ff0000 --speed 4
 k617-ctrl effect off
@@ -81,8 +89,8 @@ k617-ctrl paint W=ff0000 A=00ff00 S=ffff00 D=ff00ff Space=ffffff
 Volatile — lost when the keyboard reconnects or reboots:
 
 ```bash
-k617-ctrl animate rainbow --fps 30 --duration 10
-k617-ctrl animate chase --color ff0000 --speed 2
+k617-ctrl animate rainbow --fps 30 --duration 10  # or: -f 30
+k617-ctrl animate chase --color ff0000 --speed 2  # or: -c yellow -s 2
 k617-ctrl animate solid --color 0000ff
 ```
 
@@ -127,3 +135,18 @@ turn off.
 **Animations** (`animate`) stream 382-byte per-key reports at the requested
 frame rate with no flash commit. They are host-side only and lost on
 reconnect.
+
+## Colors
+
+Colors can be given as a name or `RRGGBB` hex (with or without `#`). Spaces,
+dashes and underscores in names are ignored, so `light green`, `light-green`
+and `lightgreen` are equivalent:
+
+```text
+red green blue white black off
+yellow cyan magenta orange pink purple lime teal violet indigo coral salmon
+navy brown gold silver gray grey olive maroon
+lightred lightgreen lightblue darkred darkgreen darkblue
+```
+
+Both `-c yellow` and `--color ffaa00` work anywhere a color flag is accepted.

@@ -3,7 +3,7 @@ name = "fizzctl"
 version = "0.2.0"
 description = "Linux tooling for the Redragon K617 Fizz: RGB effects, per-key painting, keymap, Cfg.ini parser"
 readme = "README.md"
-license = "MIT"
+license = { text = "MIT" }
 license-files = ["LICENSE"]
 authors = [
     { name = "microgod", email = "ayoubdya@gmail.com" }

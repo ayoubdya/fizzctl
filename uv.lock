@@ -12,6 +12,21 @@ wheels = [
 ]
 
 [[package]]
+name = "fizzctl"
+version = "0.2.0"
+source = { editable = "." }
+dependencies = [
+    { name = "dpkt" },
+    { name = "hidapi" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "dpkt", specifier = ">=1.9.8" },
+    { name = "hidapi", specifier = ">=0.15.0" },
+]
+
+[[package]]
 name = "hidapi"
 version = "0.15.0"
 source = { registry = "https://pypi.org/simple" }
@@ -37,19 +52,4 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ff/f0/2b4e7ff42cdc6a6bf7def0591dfd3854af81038a1925ac1ed7a96578e834/hidapi-0.15.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:cc99bb16b359023190bf857297f6492a1c8441ccacff66dac881c9e278f5c262", size = 750923, upload-time = "2025-12-09T09:46:23.161Z" },
     { url = "https://files.pythonhosted.org/packages/bd/eb/c0676ff1f7e9ec9d99eaa428c66745cdab5b1742808f0c16061c85bd0b18/hidapi-0.15.0-cp314-cp314t-win32.whl", hash = "sha256:005c84c74c940a314b211674edc763a931ace0b63685ace88148496f563e25f9", size = 66288, upload-time = "2025-12-09T09:46:25.246Z" },
     { url = "https://files.pythonhosted.org/packages/cd/5b/f22dbf886824559d3e66d84710c5fb48c09856e6816885da97f2f51700eb/hidapi-0.15.0-cp314-cp314t-win_amd64.whl", hash = "sha256:e384430363d400c4ffb33fe65f22a61c9f288a870158dc5a9f5c9d917b7250c7", size = 74723, upload-time = "2025-12-09T09:46:24.36Z" },
-]
-
-[[package]]
-name = "k617-ctrl"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "dpkt" },
-    { name = "hidapi" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "dpkt", specifier = ">=1.9.8" },
-    { name = "hidapi", specifier = ">=0.15.0" },
 ]

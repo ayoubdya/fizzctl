@@ -59,7 +59,7 @@ class K617:
             if uid != 0:
                 msg += (
                     "\nIf it is plugged in, your user may lack permission "
-                    "to see it — try running `k617-ctrl setup-udev` first."
+                    "to see it — try running `fizzctl setup-udev` first."
                 )
             raise NoDeviceError(msg)
         path = paths[0]
@@ -79,7 +79,7 @@ class K617:
                 raise NoDeviceError(
                     f"Found your K617 but it could not be opened ({display}: {e}). "
                     "Your user lacks permission to access it. Try running "
-                    "`k617-ctrl setup-udev` (or unplug/replug the keyboard), "
+                    "`fizzctl setup-udev` (or unplug/replug the keyboard), "
                     "then rerun this command."
                 ) from e
             raise NoDeviceError(
@@ -148,7 +148,7 @@ def open_device(dry_run: bool = False, debug: bool = False) -> K617 | None:
         except EOFError:
             answer = "y"
         if answer not in ("", "y", "yes"):
-            print("Skipped. You can install them later with `k617-ctrl setup-udev`.")
+            print("Skipped. You can install them later with `fizzctl setup-udev`.")
             return None
         print("Installing udev rules (you may be asked for your password)...")
         try:
@@ -236,7 +236,7 @@ def send_rgb(dev: K617, frames: list[bytes]) -> None:
         print("  [4/4] EXEC")
 
 
-# firmware effects + per-key paint (see k617_ctrl.effects)
+# firmware effects + per-key paint (see fizzctl.effects)
 def send_firmware_effect(dev: K617, frames: list[bytes]) -> None:
     """Send the 5-frame firmware-effect burst WITH the mandatory handshake.
 

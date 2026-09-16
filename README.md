@@ -1,4 +1,4 @@
-# k617-ctrl
+# fizzctl
 
 Linux tool for controlling the Redragon K617 Fizz keyboard's RGB lighting
 and restoring keymaps from `Cfg.ini` files.
@@ -17,13 +17,13 @@ pip install dist/*.whl
 ### Udev rules (needs one `sudo`)
 
 ```bash
-k617-ctrl setup-udev
+fizzctl setup-udev
 ```
 
 This installs `99-k617.rules` to `/etc/udev/rules.d/`, reloads udev and
 re-triggers device events. The command elevates its own privileged steps
 via `sudo` (you are prompted for your password), so you do **not** need to
-wrap it as `sudo k617-ctrl ...` — that fails because the binary lives in a
+wrap it as `sudo fizzctl ...` — that fails because the binary lives in a
 user-local path like `~/.local/bin`. `--dry-run` prints what would be
 written without touching the system. Unplug/replug the keyboard afterwards if
 the trigger did not pick it up.
@@ -36,7 +36,7 @@ the trigger did not pick it up.
 | `effect` | Run one of 22 firmware-native effects | yes |
 | `key` | Paint a single key | yes |
 | `paint` | Paint multiple keys at once | yes |
-| `restore` | Restore the keymap from a Cfg.ini | yes |
+| `keymap` | Write the keymap from a Cfg.ini | yes |
 | `animate` | Host-streamed animation (volatile) | no |
 
 ## Examples
@@ -52,24 +52,24 @@ All commands accept short flag aliases alongside their long forms:
 ### Set the whole board to one color
 
 ```bash
-k617-ctrl rgb red
-k617-ctrl rgb 00ff00 --brightness 4       # or: rgb 00ff00 -b 4
+fizzctl rgb red
+fizzctl rgb 00ff00 --brightness 4       # or: rgb 00ff00 -b 4
 ```
 
 ### Firmware effects
 
 All 22 effects from the official Redragon software are supported, with full
 speed and brightness control. `speed` and `brightness` are 5 levels (0-4,
-matching the firmware); higher = faster / brighter. Run `k617-ctrl effect`
+matching the firmware); higher = faster / brighter. Run `fizzctl effect`
 with no name to list every effect:
 
 ```bash
-k617-ctrl effect
-k617-ctrl effect rainbow
-k617-ctrl effect rainbow --speed 2 --brightness 4   # or: -s 2 -b 4
-k617-ctrl effect fixed-on --color 00ff00 --brightness 3
-k617-ctrl effect snake --color ff0000 --speed 4
-k617-ctrl effect off
+fizzctl effect
+fizzctl effect rainbow
+fizzctl effect rainbow --speed 2 --brightness 4   # or: -s 2 -b 4
+fizzctl effect fixed-on --color 00ff00 --brightness 3
+fizzctl effect snake --color ff0000 --speed 4
+fizzctl effect off
 ```
 
 Aliases are supported: `static` → `fixed-on`, `wheel` → `rainbow-wheel`,
@@ -81,55 +81,55 @@ Keys are named by their top-left legend. Any key *not* listed turns off
 because the canvas is absolute:
 
 ```bash
-k617-ctrl key W ff0000
-k617-ctrl paint W=ff0000 A=00ff00 S=ffff00 D=ff00ff Space=ffffff
+fizzctl key W ff0000
+fizzctl paint W=ff0000 A=00ff00 S=ffff00 D=ff00ff Space=ffffff
 ```
 
 ### Host-side animations
 
-Volatile — lost when the keyboard reconnects or reboots. Run `k617-ctrl
+Volatile — lost when the keyboard reconnects or reboots. Run `fizzctl
 animate` with no name to list the animations:
 
 ```bash
-k617-ctrl animate
-k617-ctrl animate rainbow --fps 30 --duration 10  # or: -f 30
-k617-ctrl animate chase --color ff0000 --speed 2  # or: -c yellow -s 2
-k617-ctrl animate solid --color 0000ff
+fizzctl animate
+fizzctl animate rainbow --fps 30 --duration 10  # or: -f 30
+fizzctl animate chase --color ff0000 --speed 2  # or: -c yellow -s 2
+fizzctl animate solid --color 0000ff
 ```
 
-### Restore keymap
+### Write keymap
 
 Write a full keymap from a `Cfg.ini` to flash:
 
 ```bash
-k617-ctrl restore Cfg.ini
+fizzctl keymap Cfg.ini
 ```
 
 ### Debug mode
 
 ```bash
-k617-ctrl --debug effect rainbow
+fizzctl --debug effect rainbow
 ```
 
 Shows the raw frames and handshake bytes sent over HID.
 
 ## Dev tools
 
-The `k617-ctrl-dev` binary exposes the full reverse-engineering toolkit
+The `fizzctl-dev` binary exposes the full reverse-engineering toolkit
 (capture inspect, diff, export, replay) in addition to all user commands.
 
 ```bash
-k617-ctrl-dev inspect captures/r3.json
-k617-ctrl-dev diff captures/r2.json captures/r3.json
-k617-ctrl-dev export captures/r2.json frames.json
-k617-ctrl-dev replay frames.json --dry-run
-k617-ctrl-dev cfg Cfg.ini
-k617-ctrl-dev list
+fizzctl-dev inspect captures/r3.json
+fizzctl-dev diff captures/r2.json captures/r3.json
+fizzctl-dev export captures/r2.json frames.json
+fizzctl-dev replay frames.json --dry-run
+fizzctl-dev cfg Cfg.ini
+fizzctl-dev list
 ```
 
 ## How the RGB paths work
 
-**Flash writes** (`rgb`, `key`, `paint`, `effect`, `restore`) send a 4-5 frame
+**Flash writes** (`rgb`, `key`, `paint`, `effect`, `keymap`) send a 4-5 frame
 burst through the vendor HID interface (`258a:0049`, interface 1, usage page
 `0xFF00`). The sequence ends with a `5AA5` magic commit that writes to flash.
 Colors persist across reboots. Keys not listed in a `key` or `paint` canvas

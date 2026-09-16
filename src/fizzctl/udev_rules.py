@@ -1,10 +1,10 @@
 """Udev rules for the Redragon K617 Fizz (VID 258a, PID 0049).
 
 The rules grant the current user access to the vendor HID interface(s) via the
-``uaccess`` tag (systemd-logind) and a permissive mode so ``k617-ctrl`` works
-without root.  Install with ``k617-ctrl setup-udev`` — the command escalates
+``uaccess`` tag (systemd-logind) and a permissive mode so ``fizzctl`` works
+without root.  Install with ``fizzctl setup-udev`` — the command escalates
 its own privileged steps via ``sudo`` (prompting for a password if needed),
-so you do not need ``sudo k617-ctrl`` itself.
+so you do not need ``sudo fizzctl`` itself.
 """
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def install_udev_rules(dry_run: bool = False) -> int:
         return _install_as_root(target)
 
     # Not root: escalate the privileged steps.  The binary is often installed
-    # in a user-local path (e.g. ~/.local/bin), so `sudo k617-ctrl` would fail
+    # in a user-local path (e.g. ~/.local/bin), so `sudo fizzctl` would fail
     # with "command not found" — instead we only elevate the syscalls that need
     # root, in a single sudo session (one password prompt).
     if shutil.which("sudo") is None:

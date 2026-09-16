@@ -1,7 +1,7 @@
 [project]
-name = "k617-ctrl"
-version = "0.1.0"
-description = "Linux tooling for the Redragon K617 Fizz: Cfg.ini parser, keymap restore, per-key RGB"
+name = "fizzctl"
+version = "0.2.0"
+description = "Linux tooling for the Redragon K617 Fizz: RGB effects, per-key painting, keymap, Cfg.ini parser"
 readme = "README.md"
 authors = [
     { name = "microgod", email = "ayoubdya@gmail.com" }
@@ -13,8 +13,8 @@ dependencies = [
 ]
 
 [project.scripts]
-k617-ctrl = "k617_ctrl:main"
-k617-ctrl-dev = "k617_ctrl:main_dev"
+fizzctl = "fizzctl:main"
+fizzctl-dev = "fizzctl:main_dev"
 
 [build-system]
 requires = ["uv_build>=0.12.13,<0.13.0"]

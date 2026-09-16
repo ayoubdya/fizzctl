@@ -1,21 +1,21 @@
-"""k617-ctrl — command-line interface.
+"""fizzctl — command-line interface.
 
-User commands (``k617-ctrl``):
-    k617-ctrl rgb <color> [--brightness N]  # whole-board solid color (flash write)
-    k617-ctrl effect <name>            # firmware-native effect (FLASH WRITE)
-    k617-ctrl key <key> <color>        # paint one key (FLASH WRITE)
-    k617-ctrl paint <key>=<color>...   # paint many keys (FLASH WRITE)
-    k617-ctrl animate <name>           # host-side animation (volatile stream)
-    k617-ctrl restore <Cfg.ini>        # full keymap Restore (FLASH WRITE)
-    k617-ctrl setup-udev               # install 99-k617.rules (needs root)
+User commands (``fizzctl``):
+    fizzctl rgb <color> [--brightness N]  # whole-board solid color (flash write)
+    fizzctl effect <name>            # firmware-native effect (FLASH WRITE)
+    fizzctl key <key> <color>        # paint one key (FLASH WRITE)
+    fizzctl paint <key>=<color>...   # paint many keys (FLASH WRITE)
+    fizzctl animate <name>           # host-side animation (volatile stream)
+    fizzctl keymap <Cfg.ini>           # write full keymap from Cfg.ini (FLASH WRITE)
+    fizzctl setup-udev               # install 99-k617.rules (needs root)
 
-Dev commands (``k617-ctrl-dev``, reverse-engineering toolkit):
-    k617-ctrl-dev list
-    k617-ctrl-dev cfg <Cfg.ini>
-    k617-ctrl-dev inspect <cap.json>
-    k617-ctrl-dev diff <capA.json> <capB.json>
-    k617-ctrl-dev export <cap.json> <frames.json>
-    k617-ctrl-dev replay <frames.json> [--dry-run] [--delay-ms N]
+Dev commands (``fizzctl-dev``, reverse-engineering toolkit):
+    fizzctl-dev list
+    fizzctl-dev cfg <Cfg.ini>
+    fizzctl-dev inspect <cap.json>
+    fizzctl-dev diff <capA.json> <capB.json>
+    fizzctl-dev export <cap.json> <frames.json>
+    fizzctl-dev replay <frames.json> [--dry-run] [--delay-ms N]
     plus every user command above
 """
 from __future__ import annotations
@@ -97,7 +97,7 @@ def cmd_replay(args):
     return 0
 
 
-def cmd_restore(args):
+def cmd_keymap(args):
     cfg = CfgIni(args.cfg)
     keymap = KeymapEncoder(cfg).build()
     # exact capture order: INIT, INIT, MODE, CANVAS, ROUTING, KEYMAP, EXEC
@@ -121,7 +121,7 @@ def cmd_restore(args):
             for i, f in enumerate(frames):
                 print(f"  [{i + 1}/{len(frames)}] {_kind(f)} ({len(f)}B)")
         else:
-            print(f"[dry-run] would restore keymap from {args.cfg}")
+            print(f"[dry-run] would write keymap from {args.cfg}")
         return 0
     try:
         dev = open_device(debug=args.debug)
@@ -133,7 +133,7 @@ def cmd_restore(args):
         dev.send_sequence(frames, delay_ms=args.delay_ms)
     finally:
         dev.close()
-    print(f"restored keymap from {args.cfg}")
+    print(f"wrote keymap from {args.cfg} to flash")
     return 0
 
 
@@ -141,8 +141,8 @@ def cmd_rgb(args):
     """Shortcut for `effect fixed-on <color>` (whole-board solid color).
 
     Examples:
-        k617-ctrl rgb ff0000
-        k617-ctrl rgb 00ff00 --brightness 4
+        fizzctl rgb ff0000
+        fizzctl rgb 00ff00 --brightness 4
     """
     args.name = "fixed-on"
     args.speed = None
@@ -153,17 +153,17 @@ def cmd_effect(args):
     """Run a firmware-native effect (flash write).
 
     Examples:
-        k617-ctrl effect rainbow                 # default speed/brightness
-        k617-ctrl effect rainbow --speed 2 --brightness 4
-        k617-ctrl effect waterfall --color ff8800
-        k617-ctrl effect static --brightness 1
+        fizzctl effect rainbow                 # default speed/brightness
+        fizzctl effect rainbow --speed 2 --brightness 4
+        fizzctl effect waterfall --color ff8800
+        fizzctl effect static --brightness 1
     """
     from .effects import EFFECT_ACCEPTS_COLOR, EFFECT_DEFAULTS, EFFECT_ID, encode_firmware_effect
     from .hid import send_firmware_effect
 
     name = args.name
     if name is None:
-        print("Firmware effects (22). Run like:  k617-ctrl effect rainbow --speed 2 --brightness 4")
+        print("Firmware effects (22). Run like:  fizzctl effect rainbow --speed 2 --brightness 4")
         for n, eid in EFFECT_ID.items():
             defs = EFFECT_DEFAULTS[n]
             color = "yes" if n in EFFECT_ACCEPTS_COLOR else "-"
@@ -247,7 +247,7 @@ def cmd_key(args):
 
 def cmd_paint(args):
     """Paint many keys via the CANVAS + 5AA5 execute path (flash write):
-    k617-ctrl paint W=ff0000 A=00ff00 S=0000ff D=ffffff
+    fizzctl paint W=ff0000 A=00ff00 S=0000ff D=ffffff
     """
     from .hid import rgb_sequence, send_rgb
     from .protocol import NAME_TO_INDEX
@@ -301,7 +301,7 @@ def _kind(frame: bytes) -> str:
 
 def _build_parser(dev: bool) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="k617-ctrl" if not dev else "k617-ctrl-dev",
+        prog="fizzctl" if not dev else "fizzctl-dev",
         description="Redragon K617 Fizz controller"
         if not dev
         else "Redragon K617 reverse-engineering toolkit (dev)",
@@ -330,9 +330,9 @@ def _build_parser(dev: bool) -> argparse.ArgumentParser:
                       help="solid color: rgb red -b 4 (shortcut for `effect fixed-on`)",
                       description="""
 Examples:
-  k617-ctrl rgb red
-  k617-ctrl rgb ff0000 --brightness 4
-  k617-ctrl rgb green -b 3
+  fizzctl rgb red
+  fizzctl rgb ff0000 --brightness 4
+  fizzctl rgb green -b 3
 """.rstrip(),
                       formatter_class=argparse.RawDescriptionHelpFormatter)
     px.add_argument("color")
@@ -343,10 +343,10 @@ Examples:
                           help="run a firmware-native effect (flash write); run without a name to list all",
                           description="""
 Examples:
-  k617-ctrl effect rainbow                      # defaults from stock config
-  k617-ctrl effect rainbow --speed 2 --brightness 4
-  k617-ctrl effect waterfall --color cyan
-  k617-ctrl effect                              # lists all 22 effects
+  fizzctl effect rainbow                      # defaults from stock config
+  fizzctl effect rainbow --speed 2 --brightness 4
+  fizzctl effect waterfall --color cyan
+  fizzctl effect                              # lists all 22 effects
 """.rstrip(),
                           formatter_class=argparse.RawDescriptionHelpFormatter)
     peff.add_argument("name", nargs="?",
@@ -360,9 +360,9 @@ Examples:
                         help="paint one key: key W red (flash write)",
                         description="""
 Examples:
-  k617-ctrl key W ff0000
-  k617-ctrl key A yellow
-  k617-ctrl key Space white --dry-run
+  fizzctl key W ff0000
+  fizzctl key A yellow
+  fizzctl key Space white --dry-run
 """.rstrip(),
                         formatter_class=argparse.RawDescriptionHelpFormatter)
     pk.add_argument("key")
@@ -373,9 +373,9 @@ Examples:
                         help="paint many keys: paint W=ff0000 A=00ff00 (flash write)",
                         description="""
 Examples:
-  k617-ctrl paint W=ff0000 A=00ff00 S=ffff00 D=ff00ff
-  k617-ctrl paint W=red A=orange S=yellow D=green
-  k617-ctrl paint W=ff0000 A=00ff00 Space=ffffff --dry-run
+  fizzctl paint W=ff0000 A=00ff00 S=ffff00 D=ff00ff
+  fizzctl paint W=red A=orange S=yellow D=green
+  fizzctl paint W=ff0000 A=00ff00 Space=ffffff --dry-run
 """.rstrip(),
                         formatter_class=argparse.RawDescriptionHelpFormatter)
     pp.add_argument("specs", nargs="+")
@@ -385,10 +385,10 @@ Examples:
                         help="host-side per-key animation: animate chase -c red -s 2 (volatile stream)",
                         description="""
 Examples:
-  k617-ctrl animate rainbow --fps 30 --duration 10
-  k617-ctrl animate chase --color yellow --speed 2
-  k617-ctrl animate solid --color ff0000
-  k617-ctrl animate                                 # lists all animations
+  fizzctl animate rainbow --fps 30 --duration 10
+  fizzctl animate chase --color yellow --speed 2
+  fizzctl animate solid --color ff0000
+  fizzctl animate                                 # lists all animations
 """.rstrip(),
                         formatter_class=argparse.RawDescriptionHelpFormatter)
     pa.add_argument("name", nargs="?",
@@ -398,12 +398,12 @@ Examples:
     pa.add_argument("-f", "--fps", type=int, default=30, help="frames per second")
     pa.add_argument("--duration", type=float, help="stop after N seconds (default: until Ctrl+C)")
 
-    prs = sub.add_parser("restore",
-                        help="restore keymap from Cfg.ini: restore Cfg.ini (flash write)",
+    prs = sub.add_parser("keymap",
+                        help="write the keymap from a Cfg.ini: keymap Cfg.ini (flash write)",
                         description="""
 Examples:
-  k617-ctrl restore captures/cfg-runs/cfg_r2_stock.ini
-  k617-ctrl restore Cfg.ini --dry-run
+  fizzctl keymap captures/cfg-runs/cfg_r2_stock.ini
+  fizzctl keymap Cfg.ini --dry-run
 """.rstrip(),
                         formatter_class=argparse.RawDescriptionHelpFormatter)
     prs.add_argument("cfg")
@@ -424,7 +424,7 @@ def main(dev: bool = False) -> int:
         "list": cmd_list, "cfg": cmd_cfg, "inspect": cmd_inspect,
         "diff": cmd_diff, "export": cmd_export, "replay": cmd_replay,
         "rgb": cmd_rgb, "effect": cmd_effect, "key": cmd_key,
-        "paint": cmd_paint, "animate": cmd_animate, "restore": cmd_restore,
+        "paint": cmd_paint, "animate": cmd_animate, "keymap": cmd_keymap,
         "setup-udev": cmd_setup_udev,
     }[args.cmd]
     return fn(args)

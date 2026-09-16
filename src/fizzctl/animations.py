@@ -2,7 +2,7 @@
 
 These are NOT firmware effects — they render color maps on the host and push
 one 382-byte per-key report per frame (volatile; stop with Ctrl+C).  Only the
-8 firmware-native effects (`k617-ctrl effect`) survive a disconnect.
+8 firmware-native effects (`fizzctl effect`) survive a disconnect.
 
 Animation helpers are pure ("render_frame(t, color, speed) -> dict") so they
 can be unit-tested without hardware.
@@ -114,13 +114,13 @@ def run_animation(dev, anim: str, color: tuple[int, int, int],
 
 
 def cmd_animate(args):
-    """k617-ctrl animate <name> [--color HEX] [--speed N] [--fps N] [--duration S]"""
+    """fizzctl animate <name> [--color HEX] [--speed N] [--fps N] [--duration S]"""
     from .hid import NoDeviceError, open_device
 
     anim = args.name
     if anim is None:
         print("Host-side animations (volatile — lost on disconnect). Run like:")
-        print("  k617-ctrl animate chase --color yellow --speed 2 --fps 30")
+        print("  fizzctl animate chase --color yellow --speed 2 --fps 30")
         for name in ANIMATIONS:
             print(f"  {name}")
         return 0

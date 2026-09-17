@@ -211,6 +211,17 @@ _LIGHTING_BLOCKS = (
 )
 
 
+def _read_block(dev: K617, selector: str, header: bytes) -> bytes:
+    """Select a block with a ``05 8x xx`` frame, read it, restore its header."""
+    dev.send_feature(bytes.fromhex(selector))
+    time.sleep(0.06)
+    raw = dev.get_feature(0x06, 1032)
+    frame = bytearray(1032)
+    frame[:len(raw)] = raw
+    frame[0:5] = header
+    return bytes(frame)
+
+
 def read_lighting(dev: K617) -> list[bytes]:
     """Read the device's current MODE/CANVAS/ROUTING/EXEC blocks, in order.
 
@@ -219,13 +230,14 @@ def read_lighting(dev: K617) -> list[bytes]:
     the normal write header (``06 08 b8 00 40``) so the result can be sent back
     verbatim in a write burst.
     """
-    out = []
-    for req, header in _LIGHTING_BLOCKS:
-        dev.send_feature(bytes.fromhex(req))
-        time.sleep(0.06)
-        raw = dev.get_feature(0x06, 1032)
-        frame = bytearray(1032)
-        frame[:len(raw)] = raw
-        frame[0:5] = header
-        out.append(bytes(frame))
-    return out
+    return [_read_block(dev, req, header) for req, header in _LIGHTING_BLOCKS]
+
+
+def read_keymap(dev: K617) -> bytes:
+    """Read the device's current (base) keymap block.
+
+    Only the base layer comes back — macro bindings (``10`` records) are not
+    exposed — which is why :mod:`fizzctl.state` caches them separately.  The
+    base layer is live, so it does contain your current Cfg.ini remaps.
+    """
+    return _read_block(dev, "0584d4000000", bytes.fromhex("0604d40040"))

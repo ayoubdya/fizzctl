@@ -47,6 +47,39 @@ def encode_event(delay_ms: int, hid: int, release: bool = False) -> bytes:
     return bytes((delay | (0x80 if release else 0), hid & 0xFF))
 
 
+def encode_slot(cycles: int, events: list[bytes]) -> bytes:
+    """One 128-byte macro slot: a cycle count followed by 2-byte events."""
+    slot = bytearray(SLOT_STRIDE)
+    slot[0] = max(1, min(0xFF, int(cycles)))
+    off = 1
+    for ev in events:
+        if len(ev) != 2:
+            raise ValueError("each macro event must be 2 bytes")
+        if off + 2 > SLOT_STRIDE:
+            raise ValueError(f"macro slot overflows ({len(events)} events)")
+        slot[off:off + 2] = ev
+        off += 2
+    return bytes(slot)
+
+
+def build_macro_frame(slots: dict[int, bytes]) -> bytes:
+    """Build the 1032-byte ``06 05 dc`` frame from raw 128-byte slots.
+
+    ``slots`` maps a 0-based slot index to its 128-byte contents (from
+    :func:`encode_slot`); unlisted slots stay zero (empty).
+    """
+    frame = bytearray(FRAME_LEN)
+    frame[0:5] = MACRO_HEADER
+    for idx, slot in slots.items():
+        if not 0 <= idx < MAX_SLOTS:
+            raise ValueError(f"slot index {idx} out of range 0..{MAX_SLOTS - 1}")
+        if len(slot) != SLOT_STRIDE:
+            raise ValueError(f"slot {idx} must be {SLOT_STRIDE} bytes")
+        base = SLOT_BASE + idx * SLOT_STRIDE
+        frame[base:base + SLOT_STRIDE] = slot
+    return bytes(frame)
+
+
 def encode_macro_frame(slots: list[tuple[int, list[bytes]]]) -> bytes:
     """Build the 1032-byte ``06 05 dc`` frame.
 
@@ -56,20 +89,7 @@ def encode_macro_frame(slots: list[tuple[int, list[bytes]]]) -> bytes:
     """
     if len(slots) > MAX_SLOTS:
         raise ValueError(f"{len(slots)} macros exceeds {MAX_SLOTS} slots")
-    frame = bytearray(FRAME_LEN)
-    frame[0:5] = MACRO_HEADER
-    for idx, (cycles, events) in enumerate(slots):
-        base = SLOT_BASE + idx * SLOT_STRIDE
-        frame[base] = max(1, min(0xFF, int(cycles)))
-        off = base + 1
-        for ev in events:
-            if len(ev) != 2:
-                raise ValueError("each macro event must be 2 bytes")
-            if off + 2 > base + SLOT_STRIDE:
-                raise ValueError(f"macro slot {idx} overflows ({len(events)} events)")
-            frame[off:off + 2] = ev
-            off += 2
-    return bytes(frame)
+    return build_macro_frame({i: encode_slot(c, e) for i, (c, e) in enumerate(slots)})
 
 
 def text_events(text: str, delay_ms: int = 30) -> list[bytes]:

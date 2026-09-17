@@ -27,7 +27,7 @@ import sys
 from .animations import cmd_animate
 from .capture import diff_captures, export_frames, load_frames, load_tshark_json, significant
 from .cfg import CfgIni
-from .hid import NoDeviceError, open_device, read_lighting, send_burst
+from .hid import NoDeviceError, open_device, read_keymap, read_lighting, send_burst
 from .keymap import KeymapEncoder
 from .protocol import RESTORE_CONSTANT_FRAMES
 
@@ -112,15 +112,57 @@ def _live_lighting(dev, debug: bool = False) -> list[bytes]:
         return [bytes(f) for f in RESTORE_CONSTANT_FRAMES]
 
 
+def _live_keymap(dev, debug: bool = False) -> bytes:
+    """Read the device's current base keymap so a macro write keeps the user's
+    remaps; fall back to the baked keymap if the read fails."""
+    from .blobs import CONST_KEYMAP
+    try:
+        keymap = read_keymap(dev)
+        if debug:
+            print("  read back current keymap (your remaps are kept)")
+        return keymap
+    except Exception as e:
+        if debug:
+            print(f"  could not read current keymap ({e}); using baked keymap")
+        return bytes(CONST_KEYMAP)
+
+
+def _apply_bindings(keymap: bytearray, bindings: dict) -> list[str]:
+    """Patch every cached macro binding into ``keymap`` in place; return the
+    keys that could not be found."""
+    from .macro import NAME_TO_HID, bind_macro
+    missed = []
+    for key, info in bindings.items():
+        hid = NAME_TO_HID.get(key)
+        if hid is None or bind_macro(keymap, hid, int(info["slot"]), int(info["mode"])) is None:
+            missed.append(key)
+    return missed
+
+
 def cmd_keymap(args):
-    cfg = CfgIni(args.cfg)
-    keymap = KeymapEncoder(cfg).build()
-    if args.debug:
-        print(f"built keymap from {args.cfg}")
-        print(f"  keymap block: {len(keymap)}B, must equal 1032")
+    """Write a full keymap from a Cfg.ini (flash write).
+
+    Previously created macros are re-applied on top, and the current lighting
+    (effect, color, brightness) is kept.
+
+    Examples:
+        fizzctl keymap cfgs/cfg_final.ini
+    """
+    from . import state
+    from .macro import build_macro_frame
+
+    keymap = bytearray(KeymapEncoder(CfgIni(args.cfg)).build())
     if len(keymap) != 1032:
         print("error: keymap block is not 1032 bytes")
         return 1
+    cache = state.load()
+    missed = _apply_bindings(keymap, cache["bindings"])
+    if args.debug:
+        print(f"built keymap from {args.cfg}")
+        if cache["slots"]:
+            print(f"  re-applying {len(cache['bindings'])} macro binding(s)")
+    if missed:
+        print(f"warning: could not bind {', '.join(missed)} in this keymap")
     try:
         dev = open_device(debug=args.debug)
     except NoDeviceError:
@@ -134,7 +176,11 @@ def cmd_keymap(args):
             bytes.fromhex("050581000000"),       # INIT
             bytes.fromhex("0583b6000000"),       # INIT
             mode, canvas, routing,                # current lighting
-            keymap,                               # 06 04 d4 keymap block
+        ]
+        if cache["slots"]:
+            frames.append(build_macro_frame(state.raw_slots(cache)))
+        frames += [
+            bytes(keymap),                        # 06 04 d4 keymap block
             exec_,                                # EXEC (5AA5 commit)
         ]
         send_burst(dev, frames, handshake=False, delay_ms=args.delay_ms)
@@ -212,26 +258,28 @@ def cmd_effect(args):
 def cmd_macro(args):
     """Bind a macro that types ``text`` to a key (flash write).
 
+    Each macro gets its own slot, and previously created macros are re-applied.
+    The device's current keymap is read first and used as the base, and the
+    current lighting is kept, so neither your remaps nor your effect/color are
+    disturbed.
+
     Examples:
         fizzctl macro --key CapsLock rgb
         fizzctl macro --key LAlt --delay-ms 50 --cycles 3 hello
         fizzctl macro --cfg cfgs/cfg_final.ini --key A --until-released abc
     """
-    from .blobs import CONST_KEYMAP
+    from . import state
     from .macro import (
         MODE_CYCLES, MODE_UNTIL_RELEASED, NAME_TO_HID,
-        bind_macro, encode_macro_frame, text_events,
+        build_macro_frame, encode_slot, text_events,
     )
 
     if args.key not in NAME_TO_HID:
         print(f"unknown key {args.key!r}")
         return 1
-    hid = NAME_TO_HID[args.key]
-
-    if args.cfg:
-        base = bytearray(KeymapEncoder(CfgIni(args.cfg)).build())
-    else:
-        base = bytearray(CONST_KEYMAP)
+    if args.cycles < 1:
+        print("--cycles must be at least 1")
+        return 1
 
     try:
         events = text_events(args.text, args.delay_ms)
@@ -240,16 +288,18 @@ def cmd_macro(args):
         return 1
 
     mode = MODE_UNTIL_RELEASED if args.until_released else MODE_CYCLES
-    macro_frame = encode_macro_frame([(args.cycles, events)])
-
-    off = bind_macro(base, hid, 0, mode)
-    if off is None:
-        print(f"could not find key {args.key!r} in the keymap")
+    cache = state.load()
+    try:
+        slot = state.alloc_slot(cache, args.key)
+    except ValueError as e:
+        print(e)
         return 1
+    cache["slots"][str(slot)] = encode_slot(args.cycles, events).hex()
+    cache["bindings"][args.key] = {"slot": slot, "mode": mode}
 
     if args.debug:
-        print(f"macro: slot0 cycles={args.cycles} events={len(events)} "
-              f"mode={mode:#04x} bind={args.key}@{off:#05x}")
+        print(f"macro: slot{slot} cycles={args.cycles} events={len(events)} "
+              f"mode={mode:#04x} bind={args.key}")
 
     try:
         dev = open_device(debug=args.debug)
@@ -259,18 +309,29 @@ def cmd_macro(args):
         return 1
     try:
         mode_f, canvas_f, routing_f, exec_f = _live_lighting(dev, args.debug)
+        if args.cfg:
+            base = bytearray(KeymapEncoder(CfgIni(args.cfg)).build())
+        else:
+            base = bytearray(_live_keymap(dev, args.debug))
+        missed = _apply_bindings(base, cache["bindings"])
+        if args.key in missed:
+            print(f"could not find key {args.key!r} in the keymap")
+            return 1
+        if missed:
+            print(f"warning: could not bind {', '.join(missed)} in the keymap")
         # exact capture order, but with the device's live lighting blocks
         frames = [
             bytes.fromhex("0583b6000000"),   # INIT
             mode_f, canvas_f, routing_f,     # current lighting
-            macro_frame,                     # 06 05 dc
-            bytes(base),                     # 06 04 d4 (with binding)
+            build_macro_frame(state.raw_slots(cache)),   # 06 05 dc (all slots)
+            bytes(base),                     # 06 04 d4 (all bindings)
             exec_f,                          # EXEC (5AA5 commit)
         ]
         send_burst(dev, frames, handshake=False, delay_ms=args.burst_ms)
     finally:
         dev.close()
-    print(f"bound {args.key} -> macro typing {args.text!r}")
+    state.save(cache)
+    print(f"bound {args.key} -> macro typing {args.text!r} (slot {slot})")
     return 0
 
 

@@ -1,4 +1,6 @@
 import hashlib
+import os
+import tempfile
 import unittest
 from unittest.mock import Mock, call, patch
 
@@ -9,6 +11,16 @@ from fizzctl.protocol import base_frames
 
 
 class RegressionTests(unittest.TestCase):
+    def setUp(self):
+        # keep the macro cache out of the developer's real state file
+        self._tmp = tempfile.TemporaryDirectory()
+        self._env = patch.dict(os.environ, {"XDG_STATE_HOME": self._tmp.name})
+        self._env.start()
+
+    def tearDown(self):
+        self._env.stop()
+        self._tmp.cleanup()
+
     def test_packet_bytes(self):
         names = ("CONST_MODE", "CONST_CANVAS", "CONST_ROUTING", "CONST_EXEC", "RGB_SEC", "RGB_EXEC")
         data = b"".join(getattr(blobs, name) for name in names) + b"".join(blobs.FW_TEMPLATE)
@@ -154,18 +166,21 @@ class RegressionTests(unittest.TestCase):
     @patch("fizzctl.cli.open_device")
     def test_cli_macro(self, open_device, sleep):
         dev = Mock(debug=False)
-        dev.get_feature.return_value = bytes(1032)
+        dev.get_feature.return_value = bytes(blobs.CONST_KEYMAP)
         open_device.return_value = dev
         parser = cli._build_parser(False)
+
+        # 4 lighting read-selector sends + 1 keymap read-selector send
+        def burst():
+            return [c.args[0] for c in dev.send_feature.call_args_list][5:]
 
         rc = cli.cmd_macro(parser.parse_args(["macro", "--key", "CapsLk", "rgb"]))
         self.assertEqual(rc, 0)
         dev.close.assert_called_once()
-        # 4 reads to preserve lighting, but no handshake GET after INIT
-        self.assertEqual(dev.get_feature.call_count, 4)
+        # 4 lighting reads + 1 keymap read; no handshake GET after INIT
+        self.assertEqual(dev.get_feature.call_count, 5)
         dev.get_feature.assert_called_with(6, 1032)
-        # skip the 4 read-selector frames; the burst follows
-        frames = [c.args[0] for c in dev.send_feature.call_args_list][4:]
+        frames = burst()
         self.assertEqual([f[:3] for f in frames], [
             bytes.fromhex("0583b6"), bytes.fromhex("0608b8"),
             bytes.fromhex("0609bc"), bytes.fromhex("0609c0"),
@@ -174,18 +189,68 @@ class RegressionTests(unittest.TestCase):
         ])
         self.assertEqual(frames[4][9:22], bytes.fromhex("011e159e151e0a9e0a1e059e05"))
         self.assertEqual(bytes(frames[5][616:620]), bytes((0x10, 0x00, 0x01, 0x00)))
+        # LAlt (a different key) is left untouched in the live-base keymap
+        self.assertEqual(bytes(frames[5][660:664]), bytes((0x06, 0x00, 0x00, 0xE2)))
 
         dev.reset_mock()
         rc = cli.cmd_macro(parser.parse_args(
             ["macro", "--key", "LAlt", "--until-released", "--cycles", "3", "hi"]))
         self.assertEqual(rc, 0)
-        self.assertEqual(bytes(dev.send_feature.call_args_list[4 + 5].args[0][660:664]),
-                         bytes((0x10, 0x00, 0x04, 0x00)))
+        frames = burst()
+        slot1 = 9 + 128
+        self.assertEqual(frames[4][slot1], 3)                    # slot1 cycle count
+        self.assertEqual(frames[4][9:22], bytes.fromhex("011e159e151e0a9e0a1e059e05"))
+        # both macros retained: slot0 (CapsLk) and slot1 (LAlt, until-released)
+        self.assertEqual(bytes(frames[5][616:620]), bytes((0x10, 0x00, 0x01, 0x00)))
+        self.assertEqual(bytes(frames[5][660:664]), bytes((0x10, 0x00, 0x04, 0x01)))
 
         open_device.reset_mock()
         self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--key", "Nope", "x"])), 1)
         self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--key", "A", "@"])), 1)
+        self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--key", "A", "", "--cycles", "0"])), 1)
         open_device.assert_not_called()
+
+    def test_macro_slot_helpers(self):
+        from fizzctl.macro import SLOT_BASE, build_macro_frame, encode_slot
+
+        slot = encode_slot(3, [bytes.fromhex("1e15"), bytes.fromhex("9e15")])
+        self.assertEqual(len(slot), 128)
+        self.assertEqual(slot[0], 3)
+        self.assertEqual(slot[1:5], bytes.fromhex("1e159e15"))
+        self.assertEqual(slot[5:], bytes(123))
+        frame = build_macro_frame({0: slot})
+        self.assertEqual(frame[:5], bytes.fromhex("0605dc0040"))
+        self.assertEqual(frame[SLOT_BASE:SLOT_BASE + 5], bytes.fromhex("031e159e15"))
+        self.assertEqual(len(frame), 1032)
+        with self.assertRaises(ValueError):
+            build_macro_frame({8: slot})
+
+    def test_state_alloc_slot(self):
+        from fizzctl import state
+
+        st = {"slots": {}, "bindings": {}}
+        self.assertEqual(state.alloc_slot(st, "CapsLk"), 0)
+        st["slots"]["0"] = "00" * 128
+        st["bindings"]["CapsLk"] = {"slot": 0, "mode": 1}
+        self.assertEqual(state.alloc_slot(st, "CapsLk"), 0)   # reuse existing
+        self.assertEqual(state.alloc_slot(st, "LAlt"), 1)     # next free
+
+    @patch("time.sleep")
+    @patch("fizzctl.cli.open_device")
+    def test_cli_keymap_reapplies_macros(self, open_device, sleep):
+        dev = Mock(debug=False)
+        dev.get_feature.return_value = bytes(blobs.CONST_KEYMAP)
+        open_device.return_value = dev
+        parser = cli._build_parser(False)
+
+        self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--key", "CapsLk", "rgb"])), 0)
+        dev.reset_mock()
+        self.assertEqual(cli.cmd_keymap(parser.parse_args(["keymap", "cfgs/cfg_final.ini"])), 0)
+        frames = [c.args[0] for c in dev.send_feature.call_args_list][4:]
+        # light.., MACRO, KEYMAP, EXEC — the cached macro frame is re-sent
+        self.assertEqual(len(frames), 8)
+        self.assertEqual(frames[-3][:3], bytes.fromhex("0605dc"))
+        self.assertEqual(bytes(frames[-2][616:620]), bytes((0x10, 0x00, 0x01, 0x00)))
 
     @patch("time.sleep")
     def test_read_lighting_restores_headers(self, sleep):

@@ -1,37 +1,33 @@
 [project]
 name = "fizzctl"
-version = "0.2.0"
+version = "0.2.1"
 description = "Control a Redragon K617 Fizz keyboard on Linux: solid colors, 22 firmware-native RGB effects, per-key painting, live animations, and Cfg.ini keymap restore — no vendor software required"
 readme = "README.md"
 license = { text = "MIT" }
-authors = [
-    { name = "Ayoub Dya", email = "ayoubdya@gmail.com" }
-]
+authors = [{ name = "Ayoub Dya", email = "ayoubdya@gmail.com" }]
 keywords = [
-    "redragon",
-    "k617",
-    "fizz",
-    "rgb",
-    "keyboard",
-    "backlight",
-    "led",
-    "hid",
-    "linux",
+  "redragon",
+  "k617",
+  "fizz",
+  "rgb",
+  "keyboard",
+  "backlight",
+  "led",
+  "hid",
+  "linux",
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
-    "Environment :: Console",
-    "Intended Audience :: End Users/Desktop",
-    "Operating System :: POSIX :: Linux",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.14",
-    "Topic :: System :: Hardware :: Hardware Drivers",
-    "Topic :: System :: Hardware",
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: System :: Hardware :: Hardware Drivers",
+  "Topic :: System :: Hardware",
 ]
 requires-python = ">=3.14"
-dependencies = [
-    "hidapi>=0.15.0",
-]
+dependencies = ["hidapi>=0.15.0"]
 
 [project.scripts]
 fizzctl = "fizzctl:main"

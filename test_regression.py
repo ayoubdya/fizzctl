@@ -83,6 +83,56 @@ class RegressionTests(unittest.TestCase):
         send_burst(dev, [], handshake=False)
         self.assertEqual(dev.mock_calls, [])
 
+    def test_macro_frame_layout(self):
+        from fizzctl.macro import encode_event, encode_macro_frame, text_events
+
+        # the OEM's "rgb" macro: 109 down-R, 16 down-G, 63 up-R, 93 up-G,
+        # 63 down-B, 3 up-B
+        events = [
+            encode_event(109, 0x15), encode_event(16, 0x0A),
+            encode_event(63, 0x15, True), encode_event(93, 0x0A, True),
+            encode_event(63, 0x05), encode_event(3, 0x05, True),
+        ]
+        frame = encode_macro_frame([(1, events)])
+        self.assertEqual(len(frame), 1032)
+        self.assertEqual(frame[:5], bytes.fromhex("0605dc0040"))
+        self.assertEqual(frame[9], 0x01)                 # slot0 cycle count
+        self.assertEqual(frame[10:22], bytes.fromhex("6d15100abf15dd0a3f058305"))
+
+        # text helper: each char = press event + release event
+        self.assertEqual(
+            text_events("rgb", 30),
+            [encode_event(30, 0x15), encode_event(30, 0x15, True),
+             encode_event(30, 0x0A), encode_event(30, 0x0A, True),
+             encode_event(30, 0x05), encode_event(30, 0x05, True)],
+        )
+
+    def test_macro_binding(self):
+        from fizzctl.macro import (MODE_CYCLES, MODE_UNTIL_RELEASED,
+                                   NAME_TO_HID, bind_macro)
+
+        # offsets verified from captures: key "0"->576, CapsLk->616, LAlt->660
+        for name, off in (("0", 576), ("CapsLk", 616), ("LAlt", 660)):
+            with self.subTest(key=name):
+                b = bytearray(blobs.CONST_KEYMAP)
+                self.assertEqual(bind_macro(b, NAME_TO_HID[name], 0, MODE_CYCLES), off)
+                self.assertEqual(bytes(b[off:off + 4]), bytes((0x10, 0x00, 0x01, 0x00)))
+
+        # macro slot index lands in the record's byte3; play-mode in byte2
+        b = bytearray(blobs.CONST_KEYMAP)
+        bind_macro(b, NAME_TO_HID["0"], 0, MODE_CYCLES)
+        bind_macro(b, NAME_TO_HID["LAlt"], 1, MODE_CYCLES)
+        self.assertEqual(bytes(b[576:580]), bytes((0x10, 0x00, 0x01, 0x00)))
+        self.assertEqual(bytes(b[660:664]), bytes((0x10, 0x00, 0x01, 0x01)))
+        b = bytearray(blobs.CONST_KEYMAP)
+        bind_macro(b, NAME_TO_HID["LAlt"], 0, MODE_UNTIL_RELEASED)
+        self.assertEqual(bytes(b[660:664]), bytes((0x10, 0x00, 0x04, 0x00)))
+
+        # unknown key -> no match, keymap untouched
+        b = bytearray(blobs.CONST_KEYMAP)
+        self.assertIsNone(bind_macro(b, 0x99, 0, MODE_CYCLES))
+        self.assertEqual(bytes(b), blobs.CONST_KEYMAP)
+
     @patch("time.sleep")
     @patch("fizzctl.cli.open_device")
     def test_cli(self, open_device, sleep):
@@ -98,6 +148,39 @@ class RegressionTests(unittest.TestCase):
                 dev.get_feature.assert_called_once_with(6, 1032)
         open_device.reset_mock()
         self.assertEqual(cli.cmd_paint(parser.parse_args(["paint", "W=invalid"])), 1)
+        open_device.assert_not_called()
+
+    @patch("time.sleep")
+    @patch("fizzctl.cli.open_device")
+    def test_cli_macro(self, open_device, sleep):
+        dev = Mock(debug=False)
+        open_device.return_value = dev
+        parser = cli._build_parser(False)
+
+        rc = cli.cmd_macro(parser.parse_args(["macro", "--key", "CapsLk", "rgb"]))
+        self.assertEqual(rc, 0)
+        dev.close.assert_called_once()
+        dev.get_feature.assert_not_called()              # macro burst has no handshake
+        frames = [c.args[0] for c in dev.send_feature.call_args_list]
+        self.assertEqual([f[:3] for f in frames], [
+            bytes.fromhex("0583b6"), bytes.fromhex("0608b8"),
+            bytes.fromhex("0609bc"), bytes.fromhex("0609c0"),
+            bytes.fromhex("0605dc"), bytes.fromhex("0604d4"),
+            bytes.fromhex("0603b6"),
+        ])
+        self.assertEqual(frames[4][9:22], bytes.fromhex("011e159e151e0a9e0a1e059e05"))
+        self.assertEqual(bytes(frames[5][616:620]), bytes((0x10, 0x00, 0x01, 0x00)))
+
+        dev.reset_mock()
+        rc = cli.cmd_macro(parser.parse_args(
+            ["macro", "--key", "LAlt", "--until-released", "--cycles", "3", "hi"]))
+        self.assertEqual(rc, 0)
+        self.assertEqual(bytes(dev.send_feature.call_args_list[5].args[0][660:664]),
+                         bytes((0x10, 0x00, 0x04, 0x00)))
+
+        open_device.reset_mock()
+        self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--key", "Nope", "x"])), 1)
+        self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--key", "A", "@"])), 1)
         open_device.assert_not_called()
 
 

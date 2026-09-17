@@ -7,6 +7,7 @@ User commands (``fizzctl``):
     fizzctl paint <key>=<color>...   # paint many keys (FLASH WRITE)
     fizzctl animate <name>           # host-side animation (volatile stream)
     fizzctl keymap <Cfg.ini>           # write full keymap from Cfg.ini (FLASH WRITE)
+    fizzctl macro --key K <text>     # bind a macro that types text (FLASH WRITE)
     fizzctl setup-udev               # install 99-k617.rules (needs root)
 
 Dev commands (``fizzctl-dev``, reverse-engineering toolkit):
@@ -195,6 +196,72 @@ def cmd_effect(args):
     return 0
 
 
+def cmd_macro(args):
+    """Bind a macro that types ``text`` to a key (flash write).
+
+    Examples:
+        fizzctl macro --key CapsLock rgb
+        fizzctl macro --key LAlt --delay-ms 50 --cycles 3 hello
+        fizzctl macro --cfg cfgs/cfg_final.ini --key A --until-released abc
+    """
+    from .blobs import CONST_KEYMAP
+    from .macro import (
+        MODE_CYCLES, MODE_UNTIL_RELEASED, NAME_TO_HID,
+        bind_macro, encode_macro_frame, text_events,
+    )
+
+    if args.key not in NAME_TO_HID:
+        print(f"unknown key {args.key!r}")
+        return 1
+    hid = NAME_TO_HID[args.key]
+
+    if args.cfg:
+        base = bytearray(KeymapEncoder(CfgIni(args.cfg)).build())
+    else:
+        base = bytearray(CONST_KEYMAP)
+
+    try:
+        events = text_events(args.text, args.delay_ms)
+    except KeyError as e:
+        print(f"cannot type character {e.args[0]!r}")
+        return 1
+
+    mode = MODE_UNTIL_RELEASED if args.until_released else MODE_CYCLES
+    macro_frame = encode_macro_frame([(args.cycles, events)])
+
+    off = bind_macro(base, hid, 0, mode)
+    if off is None:
+        print(f"could not find key {args.key!r} in the keymap")
+        return 1
+
+    # exact capture order: INIT, MODE, CANVAS, ROUTING, MACRO, KEYMAP, EXEC
+    frames = [
+        bytes.fromhex("0583b6000000"),   # INIT
+        RESTORE_CONSTANT_FRAMES[0],      # MODE
+        RESTORE_CONSTANT_FRAMES[1],      # CANVAS
+        RESTORE_CONSTANT_FRAMES[2],      # ROUTING
+        macro_frame,                     # 06 05 dc
+        bytes(base),                     # 06 04 d4 (with binding)
+        RESTORE_CONSTANT_FRAMES[3],      # EXEC (5AA5 commit)
+    ]
+    if args.debug:
+        print(f"macro: slot0 cycles={args.cycles} events={len(events)} "
+              f"mode={mode:#04x} bind={args.key}@{off:#05x}")
+
+    try:
+        dev = open_device(debug=args.debug)
+    except NoDeviceError:
+        return 1
+    if dev is None:
+        return 1
+    try:
+        send_burst(dev, frames, handshake=False, delay_ms=args.burst_ms)
+    finally:
+        dev.close()
+    print(f"bound {args.key} -> macro typing {args.text!r}")
+    return 0
+
+
 def cmd_key(args):
     """Paint a single key (`key W red` == `paint W=red`)."""
     args.specs = [f"{args.key}={args.color}"]
@@ -340,6 +407,29 @@ Examples:
     prs.add_argument("cfg")
     prs.add_argument("--delay-ms", type=int, default=30)
 
+    pm = sub.add_parser("macro",
+                        help="bind a macro that types TEXT to a key (flash write)",
+                        description="""
+Examples:
+  fizzctl macro --key CapsLock rgb
+  fizzctl macro --key LAlt --delay-ms 50 --cycles 3 hello
+  fizzctl macro --cfg cfgs/cfg_final.ini --key A --until-released abc
+""".rstrip(),
+                        formatter_class=argparse.RawDescriptionHelpFormatter)
+    pm.add_argument("text", help="characters the macro types")
+    pm.add_argument("-k", "--key", required=True,
+                    help="key to bind (e.g. CapsLock, LAlt, A)")
+    pm.add_argument("--cfg", help="rebuild the keymap from this Cfg.ini "
+                                  "(default: baked stock keymap)")
+    pm.add_argument("--delay-ms", type=int, default=30,
+                    help="delay between macro events (default 30)")
+    pm.add_argument("--cycles", type=int, default=1,
+                    help="play the macro N times (default 1)")
+    pm.add_argument("--until-released", action="store_true",
+                    help="cycle until the bound key is released")
+    pm.add_argument("--burst-ms", type=int, default=30,
+                    help="delay between USB frames (default 30)")
+
     psudev = sub.add_parser("setup-udev", help="install 99-k617.rules + reload udev (needs root)")
 
     return p
@@ -354,7 +444,7 @@ def main(dev: bool = False) -> int:
         "diff": cmd_diff, "export": cmd_export, "replay": cmd_replay,
         "rgb": cmd_rgb, "effect": cmd_effect, "key": cmd_key,
         "paint": cmd_paint, "animate": cmd_animate, "keymap": cmd_keymap,
-        "setup-udev": cmd_setup_udev,
+        "macro": cmd_macro, "setup-udev": cmd_setup_udev,
     }[args.cmd]
     return fn(args)
 

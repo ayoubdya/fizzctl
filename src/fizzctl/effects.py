@@ -4,19 +4,23 @@ Two independent protocols:
 
 * Firmware effects — a 5-frame burst, all built from the fw-static template
   by patching a few bytes:
-      MODE[29..31]  = base color (R,G,B)
-      CANVAS        = per-key base color in the split-plane RGB layout
-      EXEC[21]      = effect_id (selects rainbow/snake/wheel/...)
-      EXEC[39]      = packed nibbles (high=speed-1 (0..4), low=brightness 0..4)
+      MODE[218..220] = base color (R,G,B) — the real color field (per-effect
+                       slot; sine-wave uses MODE[281..283])
+      EXEC[38+2*(id-1)] = per-effect RGB/color toggle: 0x07 multicolor,
+                         0x00 render the MODE base color
+      EXEC[21]       = effect_id (selects rainbow/snake/wheel/...)
+      EXEC[39]       = packed nibbles (high=speed-1 (0..4), low=brightness 0..4)
   Sending requires the mandatory GET_REPORT(0x06, 1032) handshake after INIT
   (without it the firmware silently ignores the burst).
 
   Speed is stored 0-based: the firmware displays ``nibble + 1`` as speed
   1..5, so passing ``--speed 1`` stores 0.  Verified on hardware (sine-wave:
   sending 1/2/3 showed 2/3/4 before the fix).  Brightness is stored raw
-  (0..4).  A base color is written to BOTH the MODE frame and the CANVAS
-  split-plane: the OEM templates bake their color into MODE[29..31] (static
-  red, the rest green), while the canvas holds per-key RGB.
+  (0..4).  The color mechanism was verified from OEM captures (same effect in
+  red/green/blue differs only at the effect's MODE color slots, with that
+  effect's flag byte zeroed); all stock templates bake every flag byte to
+  0x07 (multicolor), so the base color needs the effect's own flag flipped to
+  0x00 to take effect — EXEC[56] (the old assumption) is only snake's slot.
 
 * Per-key paint — a SINGLE 382-byte feature report ``08 0a 7a 01`` followed by
   96 RGB triplets in a 16-col x 6-row column-major raster (pos = col*6+row).
@@ -68,6 +72,23 @@ EFFECTS = [
     ("off",             ("off",),            0x16, True,  0x00, ""),
 ]
 
+# The base color slot in the MODE frame is effect-specific.  Verified:
+#   fixed-on (0x01)   -> MODE[29..31]   live-tested green on hardware
+#   snake (0x0a)      -> MODE[218,219,220]  live-tested blue on hardware
+#   sine-wave (0x0d)  -> MODE[280..284]-ish: red/green OEM captures moved
+#       bytes [281]=R and [282]=G (byte [280]=0xff constant; B at [283]
+#       inferred since both captured colors had B=0).  Everything else
+#       defaults to the [218..220] slot (snake-verified).
+_COLOR_SLOTS: dict[str, tuple[int, int, int]] = {
+    "fixed-on": (29, 30, 31),
+    "sine-wave": (281, 282, 283),
+}
+
+
+def _color_slot(name: str) -> tuple[int, int, int]:
+    return _COLOR_SLOTS.get(name, (218, 219, 220))
+
+
 EFFECT_ID: dict[str, int] = {n: eid for n, _, eid, *_ in EFFECTS}
 _ALIASES: dict[str, str] = {a: n for n, as_, *_ in EFFECTS for a in as_}
 EFFECT_ACCEPTS_COLOR = {n for n, _, _, ac, *_ in EFFECTS if ac}
@@ -96,17 +117,25 @@ def encode_firmware_effect(
     brightness: int | None = None,
 ) -> list[bytes]:
     """Encode the 5-frame burst (INIT, MODE, CANVAS, ROUTING, EXEC) for an
-    effect.  Patches MODE[29..31] and the CANVAS split planes (color),
-    EXEC[21] (effect_id) and the speed/brightness onto the fw-static baseline.
+    effect.  Patches the effect's MODE color slot, EXEC[21] (effect_id), its
+    EXEC[38+2*(id-1)] RGB/color toggle and the speed/brightness onto the
+    fw-static baseline.
+
+    The color mechanism was established from OEM captures: applying the same
+    effect in red/green/blue differs ONLY at the MODE color slot (snake:
+    MODE[218..220]; sine-wave: MODE[281..283]).  Each effect owns an
+    RGB/color toggle byte at EXEC[38+2*(id-1)]: 0x07 = multicolor animation,
+    0x00 = render the MODE base color instead.  Stock templates bake every
+    toggle to 0x07 (the OEM's "RGB" checkbox is ON by default), which is why
+    colors silently never took effect before — and EXEC[56] is only snake's
+    toggle, not a global one.
 
     OEM slider ranges: speed 1..5, brightness 0..4 (5 levels each).  Values
     are clamped when the user passes them; missing flags keep the template
     default (so ``off`` at 0x00 is preserved).  A color is only applied when
-    the effect accepts one; when no color is given the baked per-key pattern
+    the effect accepts one; when no color is given the baked RGB-mode flag
     is left untouched.
     """
-    from .protocol import LED_INDEX, set_key_color
-
     name = _canonical(name)
     eid = EFFECT_ID[name]
     defaults = EFFECT_DEFAULTS[name]
@@ -116,9 +145,13 @@ def encode_firmware_effect(
 
     if color is not None and name in EFFECT_ACCEPTS_COLOR:
         r, g, b = color[0] & 0xFF, color[1] & 0xFF, color[2] & 0xFF
-        mode[29], mode[30], mode[31] = r, g, b
-        for idx in LED_INDEX:
-            set_key_color(canvas, idx, (r, g, b))
+        ro, go, bo = _color_slot(name)
+        mode[ro], mode[go], mode[bo] = r, g, b
+        # EXEC[38 + 2*(eid-1)] is this effect's RGB/single-color flag byte
+        # (0x07 = RGB/random, 0x00 = render MODE color).  EXEC[56] is the
+        # snake (eid 10) slot -- not a global toggle, which is why sine stayed
+        # multicolor before the per-effect slot was used.
+        exec_[38 + 2 * (eid - 1)] = 0x00
 
     exec_[21] = eid
 

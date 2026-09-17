@@ -37,21 +37,34 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(exec_[39], 0x30)
         self.assertEqual(exec_[21], 0x01)
 
-    def test_effect_color_lands_in_mode_and_canvas(self):
-        from fizzctl.protocol import BLUE_BASE, GREEN_BASE, RED_BASE
+    def test_effect_color_lands_in_mode_color_field(self):
+        # snake uses the default MODE[218..220] color slot (live-verified);
+        # eid 0x0a -> flag byte 38+2*9 = EXEC[56]
+        frames = encode_firmware_effect("snake", color=(0xff, 0x88, 0x00))
+        mode, canvas, exec_ = frames[1], frames[2], frames[4]
+        self.assertEqual((mode[218], mode[219], mode[220]), (0xff, 0x88, 0x00))
+        self.assertEqual(exec_[56], 0x00)                    # RGB toggle off
+        self.assertEqual(bytes(canvas), bytes(base_frames()[2]))
 
+        # sine-wave's slot is different (OEM red/green captures: [281]=R, [282]=G);
+        # eid 0x0d -> flag byte 38+2*12 = EXEC[62] (EXEC[56] is snake's slot)
         frames = encode_firmware_effect("sine-wave", color=(0xff, 0x88, 0x00))
-        mode, canvas = frames[1], frames[2]
-        self.assertEqual((mode[29], mode[30], mode[31]), (0xff, 0x88, 0x00))
-        for idx in (21, 44, 65):
-            self.assertEqual(canvas[RED_BASE + idx], 0xff)
-            self.assertEqual(canvas[GREEN_BASE + idx], 0x88)
-            self.assertEqual(canvas[BLUE_BASE + idx], 0x00)
+        mode, exec_f = frames[1], frames[4]
+        self.assertEqual((mode[281], mode[282], mode[283]), (0xff, 0x88, 0x00))
+        self.assertEqual(exec_f[62], 0x00)
+        self.assertEqual(exec_f[56], 0x07)                   # snake slot stays RGB
 
-        # no color given -> the baked per-key pattern is untouched
+        # fixed-on's color slot is MODE[29..31] (live-verified green);
+        # eid 0x01 -> flag byte 38+0 = EXEC[38]
+        frames = encode_firmware_effect("fixed-on", color=(0x00, 0xff, 0x00))
+        mode, exec_f = frames[1], frames[4]
+        self.assertEqual((mode[29], mode[30], mode[31]), (0x00, 0xff, 0x00))
+        self.assertEqual(exec_f[38], 0x00)
+
+        # no color given -> RGB mode (0x07) kept, canvas untouched
         plain = encode_firmware_effect("sine-wave")
+        self.assertEqual(plain[4][62], 0x07)
         self.assertEqual(bytes(plain[2]), bytes(base_frames()[2]))
-        self.assertNotEqual(bytes(plain[2]), bytes(frames[2]))
 
     @patch("time.sleep")
     def test_send_order(self, sleep):

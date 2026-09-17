@@ -197,3 +197,35 @@ def send_burst(dev: K617, frames: list[bytes], handshake: bool = True,
 def send_per_key(dev: K617, frame: bytes) -> None:
     """Send a single 382-byte per-key report (no handshake needed)."""
     dev._dev.send_feature_report(frame)
+
+
+# Read selector ("05 8x xx") -> normal write header, for each lighting block.
+# The device keeps the current effect/color/keymap-adjacent state in these
+# blocks; reading them lets a keymap/macro write echo the live state instead
+# of resetting it with the baked stock frames.
+_LIGHTING_BLOCKS = (
+    ("0588b8000000", bytes.fromhex("0608b80040")),   # MODE
+    ("0589bc000000", bytes.fromhex("0609bc0040")),   # CANVAS
+    ("0589c0000000", bytes.fromhex("0609c00040")),   # ROUTING
+    ("0583b6000000", bytes.fromhex("0603b60000")),   # EXEC
+)
+
+
+def read_lighting(dev: K617) -> list[bytes]:
+    """Read the device's current MODE/CANVAS/ROUTING/EXEC blocks, in order.
+
+    Each block is selected with a ``05 8x xx`` INIT frame and read back with
+    GET_REPORT(0x06); the read-flag header (e.g. ``06 88 ...``) is restored to
+    the normal write header (``06 08 b8 00 40``) so the result can be sent back
+    verbatim in a write burst.
+    """
+    out = []
+    for req, header in _LIGHTING_BLOCKS:
+        dev.send_feature(bytes.fromhex(req))
+        time.sleep(0.06)
+        raw = dev.get_feature(0x06, 1032)
+        frame = bytearray(1032)
+        frame[:len(raw)] = raw
+        frame[0:5] = header
+        out.append(bytes(frame))
+    return out

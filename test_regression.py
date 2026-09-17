@@ -154,14 +154,18 @@ class RegressionTests(unittest.TestCase):
     @patch("fizzctl.cli.open_device")
     def test_cli_macro(self, open_device, sleep):
         dev = Mock(debug=False)
+        dev.get_feature.return_value = bytes(1032)
         open_device.return_value = dev
         parser = cli._build_parser(False)
 
         rc = cli.cmd_macro(parser.parse_args(["macro", "--key", "CapsLk", "rgb"]))
         self.assertEqual(rc, 0)
         dev.close.assert_called_once()
-        dev.get_feature.assert_not_called()              # macro burst has no handshake
-        frames = [c.args[0] for c in dev.send_feature.call_args_list]
+        # 4 reads to preserve lighting, but no handshake GET after INIT
+        self.assertEqual(dev.get_feature.call_count, 4)
+        dev.get_feature.assert_called_with(6, 1032)
+        # skip the 4 read-selector frames; the burst follows
+        frames = [c.args[0] for c in dev.send_feature.call_args_list][4:]
         self.assertEqual([f[:3] for f in frames], [
             bytes.fromhex("0583b6"), bytes.fromhex("0608b8"),
             bytes.fromhex("0609bc"), bytes.fromhex("0609c0"),
@@ -175,13 +179,66 @@ class RegressionTests(unittest.TestCase):
         rc = cli.cmd_macro(parser.parse_args(
             ["macro", "--key", "LAlt", "--until-released", "--cycles", "3", "hi"]))
         self.assertEqual(rc, 0)
-        self.assertEqual(bytes(dev.send_feature.call_args_list[5].args[0][660:664]),
+        self.assertEqual(bytes(dev.send_feature.call_args_list[4 + 5].args[0][660:664]),
                          bytes((0x10, 0x00, 0x04, 0x00)))
 
         open_device.reset_mock()
         self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--key", "Nope", "x"])), 1)
         self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--key", "A", "@"])), 1)
         open_device.assert_not_called()
+
+    @patch("time.sleep")
+    def test_read_lighting_restores_headers(self, sleep):
+        from fizzctl.hid import read_lighting
+
+        dev = Mock(debug=False)
+        dev.get_feature.return_value = b"\x00\x00\x00\x00\x00" + \
+            bytes.fromhex("deadbeef") + bytes(1023)
+        frames = read_lighting(dev)
+        self.assertEqual(len(frames), 4)
+        self.assertTrue(all(len(f) == 1032 for f in frames))
+        self.assertEqual([f[:5] for f in frames], [
+            bytes.fromhex("0608b80040"), bytes.fromhex("0609bc0040"),
+            bytes.fromhex("0609c00040"), bytes.fromhex("0603b60000"),
+        ])
+        # payload beyond the header is echoed verbatim
+        self.assertEqual(frames[0][5:9], bytes.fromhex("deadbeef"))
+        self.assertEqual(dev.send_feature.call_count, 4)
+
+    @patch("time.sleep")
+    @patch("fizzctl.cli.open_device")
+    def test_cli_keymap_keeps_lighting(self, open_device, sleep):
+        dev = Mock(debug=False)
+        dev.get_feature.return_value = b"\x00\x00\x00\x00\x00" + \
+            bytes.fromhex("deadbeef") + bytes(1023)
+        open_device.return_value = dev
+        parser = cli._build_parser(False)
+
+        rc = cli.cmd_keymap(parser.parse_args(["keymap", "cfgs/cfg_final.ini"]))
+        self.assertEqual(rc, 0)
+        dev.close.assert_called_once()
+        frames = [c.args[0] for c in dev.send_feature.call_args_list][4:]
+        self.assertEqual([f[:3] for f in frames], [
+            bytes.fromhex("050581"), bytes.fromhex("0583b6"),
+            bytes.fromhex("0608b8"), bytes.fromhex("0609bc"),
+            bytes.fromhex("0609c0"), bytes.fromhex("0604d4"),
+            bytes.fromhex("0603b6"),
+        ])
+        # MODE frame sent carries the device's live payload, not the stock one
+        self.assertEqual(frames[2][5:9], bytes.fromhex("deadbeef"))
+
+    @patch("time.sleep")
+    @patch("fizzctl.cli.open_device")
+    def test_cli_keymap_falls_back_when_read_fails(self, open_device, sleep):
+        dev = Mock(debug=False)
+        dev.get_feature.side_effect = OSError("read error")
+        open_device.return_value = dev
+        parser = cli._build_parser(False)
+
+        rc = cli.cmd_keymap(parser.parse_args(["keymap", "cfgs/cfg_final.ini"]))
+        self.assertEqual(rc, 0)
+        frames = [c.args[0] for c in dev.send_feature.call_args_list][1:]
+        self.assertEqual(frames[2], blobs.CONST_MODE)   # stock fallback
 
 
 if __name__ == "__main__":

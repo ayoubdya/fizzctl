@@ -27,7 +27,7 @@ import sys
 from .animations import cmd_animate
 from .capture import diff_captures, export_frames, load_frames, load_tshark_json, significant
 from .cfg import CfgIni
-from .hid import NoDeviceError, open_device, send_burst
+from .hid import NoDeviceError, open_device, read_lighting, send_burst
 from .keymap import KeymapEncoder
 from .protocol import RESTORE_CONSTANT_FRAMES
 
@@ -98,21 +98,25 @@ def cmd_replay(args):
     return 0
 
 
+def _live_lighting(dev, debug: bool = False) -> list[bytes]:
+    """Read the current MODE/CANVAS/ROUTING/EXEC so a keymap/macro write keeps
+    the user's effect, color and brightness instead of resetting them."""
+    try:
+        frames = read_lighting(dev)
+        if debug:
+            print("  read back current MODE/CANVAS/ROUTING/EXEC (lighting kept)")
+        return frames
+    except Exception as e:                     # keep working on read failure
+        if debug:
+            print(f"  could not read current lighting ({e}); using stock frames")
+        return [bytes(f) for f in RESTORE_CONSTANT_FRAMES]
+
+
 def cmd_keymap(args):
     cfg = CfgIni(args.cfg)
     keymap = KeymapEncoder(cfg).build()
-    # exact capture order: INIT, INIT, MODE, CANVAS, ROUTING, KEYMAP, EXEC
-    frames = [
-        bytes.fromhex("050581000000"),       # INIT
-        bytes.fromhex("0583b6000000"),       # INIT
-        RESTORE_CONSTANT_FRAMES[0],          # MODE
-        RESTORE_CONSTANT_FRAMES[1],          # CANVAS
-        RESTORE_CONSTANT_FRAMES[2],          # ROUTING
-        keymap,                               # 06 04 d4 keymap block
-        RESTORE_CONSTANT_FRAMES[3],          # EXEC (5AA5 commit)
-    ]
     if args.debug:
-        print(f"built {len(frames)} frames from {args.cfg}")
+        print(f"built keymap from {args.cfg}")
         print(f"  keymap block: {len(keymap)}B, must equal 1032")
     if len(keymap) != 1032:
         print("error: keymap block is not 1032 bytes")
@@ -124,6 +128,15 @@ def cmd_keymap(args):
     if dev is None:
         return 1
     try:
+        mode, canvas, routing, exec_ = _live_lighting(dev, args.debug)
+        # exact capture order, but with the device's live lighting blocks
+        frames = [
+            bytes.fromhex("050581000000"),       # INIT
+            bytes.fromhex("0583b6000000"),       # INIT
+            mode, canvas, routing,                # current lighting
+            keymap,                               # 06 04 d4 keymap block
+            exec_,                                # EXEC (5AA5 commit)
+        ]
         send_burst(dev, frames, handshake=False, delay_ms=args.delay_ms)
     finally:
         dev.close()
@@ -234,16 +247,6 @@ def cmd_macro(args):
         print(f"could not find key {args.key!r} in the keymap")
         return 1
 
-    # exact capture order: INIT, MODE, CANVAS, ROUTING, MACRO, KEYMAP, EXEC
-    frames = [
-        bytes.fromhex("0583b6000000"),   # INIT
-        RESTORE_CONSTANT_FRAMES[0],      # MODE
-        RESTORE_CONSTANT_FRAMES[1],      # CANVAS
-        RESTORE_CONSTANT_FRAMES[2],      # ROUTING
-        macro_frame,                     # 06 05 dc
-        bytes(base),                     # 06 04 d4 (with binding)
-        RESTORE_CONSTANT_FRAMES[3],      # EXEC (5AA5 commit)
-    ]
     if args.debug:
         print(f"macro: slot0 cycles={args.cycles} events={len(events)} "
               f"mode={mode:#04x} bind={args.key}@{off:#05x}")
@@ -255,6 +258,15 @@ def cmd_macro(args):
     if dev is None:
         return 1
     try:
+        mode_f, canvas_f, routing_f, exec_f = _live_lighting(dev, args.debug)
+        # exact capture order, but with the device's live lighting blocks
+        frames = [
+            bytes.fromhex("0583b6000000"),   # INIT
+            mode_f, canvas_f, routing_f,     # current lighting
+            macro_frame,                     # 06 05 dc
+            bytes(base),                     # 06 04 d4 (with binding)
+            exec_f,                          # EXEC (5AA5 commit)
+        ]
         send_burst(dev, frames, handshake=False, delay_ms=args.burst_ms)
     finally:
         dev.close()

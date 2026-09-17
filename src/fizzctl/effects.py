@@ -5,10 +5,18 @@ Two independent protocols:
 * Firmware effects — a 5-frame burst, all built from the fw-static template
   by patching a few bytes:
       MODE[29..31]  = base color (R,G,B)
+      CANVAS        = per-key base color in the split-plane RGB layout
       EXEC[21]      = effect_id (selects rainbow/snake/wheel/...)
-      EXEC[39]      = packed nibbles (high=speed 1..5, low=brightness 0..4)
+      EXEC[39]      = packed nibbles (high=speed-1 (0..4), low=brightness 0..4)
   Sending requires the mandatory GET_REPORT(0x06, 1032) handshake after INIT
   (without it the firmware silently ignores the burst).
+
+  Speed is stored 0-based: the firmware displays ``nibble + 1`` as speed
+  1..5, so passing ``--speed 1`` stores 0.  Verified on hardware (sine-wave:
+  sending 1/2/3 showed 2/3/4 before the fix).  Brightness is stored raw
+  (0..4).  A base color is written to BOTH the MODE frame and the CANVAS
+  split-plane: the OEM templates bake their color into MODE[29..31] (static
+  red, the rest green), while the canvas holds per-key RGB.
 
 * Per-key paint — a SINGLE 382-byte feature report ``08 0a 7a 01`` followed by
   96 RGB triplets in a 16-col x 6-row column-major raster (pos = col*6+row).
@@ -88,14 +96,17 @@ def encode_firmware_effect(
     brightness: int | None = None,
 ) -> list[bytes]:
     """Encode the 5-frame burst (INIT, MODE, CANVAS, ROUTING, EXEC) for an
-    effect.  Patches MODE[29..31] (color), EXEC[21] (effect_id) and the
-    speed/brightness onto the fw-static baseline.
+    effect.  Patches MODE[29..31] and the CANVAS split planes (color),
+    EXEC[21] (effect_id) and the speed/brightness onto the fw-static baseline.
 
     OEM slider ranges: speed 1..5, brightness 0..4 (5 levels each).  Values
     are clamped when the user passes them; missing flags keep the template
     default (so ``off`` at 0x00 is preserved).  A color is only applied when
-    the effect accepts one.
+    the effect accepts one; when no color is given the baked per-key pattern
+    is left untouched.
     """
+    from .protocol import LED_INDEX, set_key_color
+
     name = _canonical(name)
     eid = EFFECT_ID[name]
     defaults = EFFECT_DEFAULTS[name]
@@ -103,9 +114,11 @@ def encode_firmware_effect(
     frames = [bytearray(f) for f in base_frames()]
     mode, canvas, routing, exec_ = frames[1], frames[2], frames[3], frames[4]
 
-    if name in EFFECT_ACCEPTS_COLOR:
-        r, g, b = color if color is not None else (255, 0, 0)
-        mode[29], mode[30], mode[31] = r & 0xFF, g & 0xFF, b & 0xFF
+    if color is not None and name in EFFECT_ACCEPTS_COLOR:
+        r, g, b = color[0] & 0xFF, color[1] & 0xFF, color[2] & 0xFF
+        mode[29], mode[30], mode[31] = r, g, b
+        for idx in LED_INDEX:
+            set_key_color(canvas, idx, (r, g, b))
 
     exec_[21] = eid
 
@@ -115,7 +128,8 @@ def encode_firmware_effect(
     # remembered values in a 20-slot table at EXEC[39 + 2*(id-1)] (ids 1..20;
     # the same capture shows saved 0x44 in slot 5 and 0x22 in slot 12).  The
     # value must land in both places or per-effect speed/brightness is ignored.
-    new_speed = max(1, min(5, round(speed))) if speed is not None else defaults[0]
+    # Speed is stored 0-based: the OEM displays nibble+1 (hardware-verified).
+    new_speed = (max(1, min(5, round(speed))) - 1) if speed is not None else defaults[0]
     new_bright = max(0, min(4, round(brightness))) if brightness is not None else defaults[1]
     packed = ((new_speed & 0x0F) << 4) | (new_bright & 0x0F)
     exec_[39] = packed

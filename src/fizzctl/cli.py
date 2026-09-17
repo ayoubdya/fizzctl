@@ -162,9 +162,10 @@ def cmd_effect(args):
             print(f"unknown effect {name!r}")
         print("Firmware effects (22). Run like:  fizzctl effect rainbow --speed 2 --brightness 4")
         for n, eid in EFFECT_ID.items():
-            defs = EFFECT_DEFAULTS[n]
+            spd, bri = EFFECT_DEFAULTS[n]
+            spd = spd + 1 if spd else 0   # stored 0-based, displayed 1..5
             color = "yes" if n in EFFECT_ACCEPTS_COLOR else "-"
-            print(f"  {n:18s} id={eid:#04x} color:{color:3s} default sb={defs[0]}.{defs[1]}")
+            print(f"  {n:18s} id={eid:#04x} color:{color:3s} default speed={spd} brightness={bri}")
         return 0 if name is None else 1
 
     color = None

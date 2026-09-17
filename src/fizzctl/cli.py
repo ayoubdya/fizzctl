@@ -7,7 +7,7 @@ User commands (``fizzctl``):
     fizzctl paint <key>=<color>...   # paint many keys (FLASH WRITE)
     fizzctl animate <name>           # host-side animation (volatile stream)
     fizzctl keymap <Cfg.ini>           # write full keymap from Cfg.ini (FLASH WRITE)
-    fizzctl restore                  # restore the stock keymap (FLASH WRITE)
+    fizzctl restore                  # restore factory keymap+lighting (FLASH WRITE)
     fizzctl macro --key K <text>     # bind a macro that types text (FLASH WRITE)
     fizzctl setup-udev               # install 99-k617.rules (needs root)
 
@@ -198,16 +198,44 @@ def _stock_cfg() -> str:
 
 
 def cmd_restore(args):
-    """Restore the stock (factory) keymap by writing the packaged ``stock.ini``.
+    """Restore the factory keymap, lighting and macro state (flash write).
 
-    Same as ``fizzctl keymap <stock.ini>``: keeps the current lighting and any
-    macros you have bound.  Use this to undo a Cfg.ini keymap change.
+    Writes the packaged ``stock.ini`` and the stock lighting frames, and wipes
+    all macro slots.  Unlike ``keymap``/``macro`` it does *not* keep your
+    current effect/color or your macros.
 
     Examples:
         fizzctl restore
     """
-    args.cfg = _stock_cfg()
-    return cmd_keymap(args)
+    from . import state
+    from .macro import build_macro_frame
+
+    keymap = bytearray(KeymapEncoder(CfgIni(_stock_cfg())).build())
+    if len(keymap) != 1032:
+        print("error: keymap block is not 1032 bytes")
+        return 1
+    try:
+        dev = open_device(debug=args.debug)
+    except NoDeviceError:
+        return 1
+    if dev is None:
+        return 1
+    try:
+        mode, canvas, routing, exec_ = (bytes(f) for f in RESTORE_CONSTANT_FRAMES)
+        frames = [
+            bytes.fromhex("050581000000"),   # INIT
+            bytes.fromhex("0583b6000000"),   # INIT
+            mode, canvas, routing,           # factory lighting
+            build_macro_frame({}),           # wipe all macro slots
+            bytes(keymap),                   # factory keymap
+            exec_,                           # EXEC (5AA5 commit)
+        ]
+        send_burst(dev, frames, handshake=False, delay_ms=args.delay_ms)
+    finally:
+        dev.close()
+    state.save({"slots": {}, "bindings": {}})
+    print("restored factory keymap, lighting and macros")
+    return 0
 
 
 def cmd_rgb(args):
@@ -517,10 +545,11 @@ Examples:
                     help="delay between USB frames (default 30)")
 
     pres = sub.add_parser("restore",
-                        help="restore the stock keymap (flash write)",
+                        help="restore the factory keymap, lighting and macros (flash write)",
                         description="""
-Writes the packaged stock.ini, restoring the factory keymap while keeping
-your current lighting and any macros you have bound.
+Writes the packaged stock.ini and the stock lighting frames, and wipes all
+macro slots. Unlike keymap/macro it does not keep your current effect/color
+or your macros.
 
 Examples:
   fizzctl restore

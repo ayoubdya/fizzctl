@@ -255,8 +255,12 @@ class RegressionTests(unittest.TestCase):
     @patch("time.sleep")
     @patch("fizzctl.cli.open_device")
     def test_cli_restore(self, open_device, sleep):
+        from fizzctl import state
         from fizzctl.cli import _stock_cfg
+        from fizzctl.cfg import CfgIni
+        from fizzctl.keymap import KeymapEncoder
 
+        # a live lighting payload that must NOT be preserved
         dev = Mock(debug=False)
         dev.get_feature.return_value = b"\x00\x00\x00\x00\x00" + \
             bytes.fromhex("deadbeef") + bytes(1023)
@@ -265,14 +269,18 @@ class RegressionTests(unittest.TestCase):
 
         rc = cli.cmd_restore(parser.parse_args(["restore"]))
         self.assertEqual(rc, 0)
-        frames = [c.args[0] for c in dev.send_feature.call_args_list][4:]
-        self.assertEqual(len(frames), 7)
-        self.assertEqual(frames[-2][:4], bytes.fromhex("0604d400"))  # keymap block
-        self.assertEqual(frames[2][5:9], bytes.fromhex("deadbeef"))   # lighting kept
-        # the packaged stock.ini is a real, parseable Cfg.ini
-        from fizzctl.cfg import CfgIni
-        self.assertTrue(os.path.exists(_stock_cfg()))
-        self.assertTrue(CfgIni(_stock_cfg()).keys)
+        dev.get_feature.assert_not_called()          # factory, not live lighting
+        frames = [c.args[0] for c in dev.send_feature.call_args_list]
+        self.assertEqual([f[:3] for f in frames], [
+            bytes.fromhex("050581"), bytes.fromhex("0583b6"),
+            bytes.fromhex("0608b8"), bytes.fromhex("0609bc"),
+            bytes.fromhex("0609c0"), bytes.fromhex("0605dc"),
+            bytes.fromhex("0604d4"), bytes.fromhex("0603b6"),
+        ])
+        self.assertEqual(frames[2], bytes(blobs.CONST_MODE))       # factory lighting
+        self.assertEqual(frames[5][9:], bytes(1032 - 9))           # macros wiped
+        self.assertEqual(frames[6], bytes(KeymapEncoder(CfgIni(_stock_cfg())).build()))
+        self.assertEqual(state.load(), {"slots": {}, "bindings": {}})  # cache cleared
 
     @patch("time.sleep")
     def test_read_lighting_restores_headers(self, sleep):

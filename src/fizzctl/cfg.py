@@ -104,15 +104,3 @@ class CfgIni:
     @property
     def key_entries(self) -> list[tuple[int, KeyEntry]]:
         return sorted(self.keys.items())
-
-
-if __name__ == "__main__":
-    import sys
-    cfg = CfgIni(sys.argv[1] if len(sys.argv) > 1 else "Cfg.ini")
-    print(f"OPT: {len(cfg.opt)} keys")
-    print(f"[FN] {len(cfg.fn)} mappings")
-    for idx, be in cfg.fn_entries:
-        print(f"  K{idx:<3} = {', '.join(f'0x{b:02X}' for b in be)}")
-    print(f"[KEY] {len(cfg.keys)} keys")
-    for idx, e in cfg.key_entries:
-        print(f"  K{idx:<3} = {e.matrix} {', '.join(f'0x{b:02X}' for b in e.behavior)}")

@@ -70,9 +70,9 @@ fizzctl rgb 00ff00 --brightness 4       # or: rgb 00ff00 -b 4
 ### Firmware effects
 
 All 22 effects from the official Redragon software are supported, with full
-speed and brightness control. `speed` and `brightness` are 5 levels (0-4,
-matching the firmware); higher = faster / brighter. Run `fizzctl effect`
-with no name to list every effect:
+speed and brightness control. `speed` is 1..5 and `brightness` is 0..4 (5
+levels each, matching the firmware); higher = faster / brighter. Run
+`fizzctl effect` with no name to list every effect:
 
 ```bash
 fizzctl effect

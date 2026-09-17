@@ -16,7 +16,6 @@ PID = 0x0049
 #   2 = RGB canvas base (06 09 bc 00 40 ...)
 #   3 = routing         (06 09 c0 00 40 ...)  — same family as P2, never hand-edit
 #   4 = EXEC/commit     (06 03 b6 00 00 ...)  — contains 5A A5 flash-commit magic
-FRAME_INIT, FRAME_MODE, FRAME_CANVAS, FRAME_ROUTING, FRAME_EXEC = range(5)
 
 # Constant frames of the Restore sequence (06 xx xx 00 40 ...), 1032 bytes each.
 RESTORE_CONSTANT_FRAMES: list[bytes] = [

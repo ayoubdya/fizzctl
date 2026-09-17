@@ -6,7 +6,7 @@ Two independent protocols:
   by patching a few bytes:
       MODE[29..31]  = base color (R,G,B)
       EXEC[21]      = effect_id (selects rainbow/snake/wheel/...)
-      EXEC[39]      = packed nibbles (high=speed, low=brightness)
+      EXEC[39]      = packed nibbles (high=speed 1..5, low=brightness 0..4)
   Sending requires the mandatory GET_REPORT(0x06, 1032) handshake after INIT
   (without it the firmware silently ignores the burst).
 
@@ -88,11 +88,13 @@ def encode_firmware_effect(
     brightness: int | None = None,
 ) -> list[bytes]:
     """Encode the 5-frame burst (INIT, MODE, CANVAS, ROUTING, EXEC) for an
-    effect.  Patches MODE[29..31] (color), EXEC[21] (effect_id) and
-    EXEC[69]/[71] (speed|brightness nibbles) onto the fw-static baseline.
+    effect.  Patches MODE[29..31] (color), EXEC[21] (effect_id) and the
+    speed/brightness onto the fw-static baseline.
 
-    speed/brightness are 0..4 levels (clamped to a nibble); Python ints get
-    clamped.  A color is only applied when the effect accepts one.
+    OEM slider ranges: speed 1..5, brightness 0..4 (5 levels each).  Values
+    are clamped when the user passes them; missing flags keep the template
+    default (so ``off`` at 0x00 is preserved).  A color is only applied when
+    the effect accepts one.
     """
     name = _canonical(name)
     eid = EFFECT_ID[name]
@@ -107,22 +109,18 @@ def encode_firmware_effect(
 
     exec_[21] = eid
 
-    # Byte 39 is the active speed×brightness slot (high nibble = speed,
-    # low nibble = brightness).  The firmware only exposes ~5 levels per axis:
-    # defaults in stock captures are 0x33/0x44 (speed 3/4, brightness 3/4)
-    # and `off` uses 0x00, so a nibble of 4 is max and values above 4 clamp.
-    # Verified by diffing USB captures — previously bytes 69/71 were patched
-    # (a different byte layout); those are ignored by this firmware.
-    target_speed = speed if speed is not None else defaults[0]
-    target_bright = brightness if brightness is not None else defaults[1]
-    new_speed = max(0, min(4, round(target_speed)))
-    new_bright = max(0, min(4, round(target_bright)))
+    # EXEC[39] is the live speed×brightness value (high nibble = speed,
+    # low nibble = brightness).  Evidence: an OEM solid-color capture carries
+    # 0x32 there, the fw-static template 0x34, and the OEM keeps per-effect
+    # remembered values in a 20-slot table at EXEC[39 + 2*(id-1)] (ids 1..20;
+    # the same capture shows saved 0x44 in slot 5 and 0x22 in slot 12).  The
+    # value must land in both places or per-effect speed/brightness is ignored.
+    new_speed = max(1, min(5, round(speed))) if speed is not None else defaults[0]
+    new_bright = max(0, min(4, round(brightness))) if brightness is not None else defaults[1]
     packed = ((new_speed & 0x0F) << 4) | (new_bright & 0x0F)
     exec_[39] = packed
-    # Mirror into the effect's own table slot (each entry is 2 bytes wide
-    # starting at byte 39; slot[eid] lives at 39 + eid*2).
-    if 1 <= eid <= 19:
-        exec_[39 + eid * 2] = packed
+    if 1 <= eid <= 20:
+        exec_[39 + 2 * (eid - 1)] = packed
 
     return [bytes(frames[0])] + [bytes(f) for f in frames[1:]]
 

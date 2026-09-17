@@ -288,7 +288,7 @@ Examples:
     peff.add_argument("name", nargs="?",
                       help="effect name (omit or run `effect` alone to list all)")
     peff.add_argument("-c", "--color", help="base color (name or hex) — only for color-capable effects")
-    peff.add_argument("-s", "--speed", type=int, help="0..4 (level; higher = faster)")
+    peff.add_argument("-s", "--speed", type=int, help="1..5 (level; higher = faster)")
     peff.add_argument("-b", "--brightness", type=int, help="0..4 (level; higher = brighter)")
 
     pk = sub.add_parser("key",

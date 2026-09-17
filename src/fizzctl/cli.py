@@ -7,6 +7,7 @@ User commands (``fizzctl``):
     fizzctl paint <key>=<color>...   # paint many keys (FLASH WRITE)
     fizzctl animate <name>           # host-side animation (volatile stream)
     fizzctl keymap <Cfg.ini>           # write full keymap from Cfg.ini (FLASH WRITE)
+    fizzctl restore                  # restore the stock keymap (FLASH WRITE)
     fizzctl macro --key K <text>     # bind a macro that types text (FLASH WRITE)
     fizzctl setup-udev               # install 99-k617.rules (needs root)
 
@@ -23,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from .animations import cmd_animate
 from .capture import diff_captures, export_frames, load_frames, load_tshark_json, significant
@@ -190,6 +192,24 @@ def cmd_keymap(args):
     return 0
 
 
+def _stock_cfg() -> str:
+    """Path to the packaged stock.ini (factory keymap fixture)."""
+    return str(Path(__file__).with_name("stock.ini"))
+
+
+def cmd_restore(args):
+    """Restore the stock (factory) keymap by writing the packaged ``stock.ini``.
+
+    Same as ``fizzctl keymap <stock.ini>``: keeps the current lighting and any
+    macros you have bound.  Use this to undo a Cfg.ini keymap change.
+
+    Examples:
+        fizzctl restore
+    """
+    args.cfg = _stock_cfg()
+    return cmd_keymap(args)
+
+
 def cmd_rgb(args):
     """Shortcut for `effect fixed-on <color>` (whole-board solid color).
 
@@ -266,7 +286,6 @@ def cmd_macro(args):
     Examples:
         fizzctl macro --key CapsLock rgb
         fizzctl macro --key LAlt --delay-ms 50 --cycles 3 hello
-        fizzctl macro --cfg cfgs/cfg_final.ini --key A --until-released abc
     """
     from . import state
     from .macro import (
@@ -309,10 +328,7 @@ def cmd_macro(args):
         return 1
     try:
         mode_f, canvas_f, routing_f, exec_f = _live_lighting(dev, args.debug)
-        if args.cfg:
-            base = bytearray(KeymapEncoder(CfgIni(args.cfg)).build())
-        else:
-            base = bytearray(_live_keymap(dev, args.debug))
+        base = bytearray(_live_keymap(dev, args.debug))
         missed = _apply_bindings(base, cache["bindings"])
         if args.key in missed:
             print(f"could not find key {args.key!r} in the keymap")
@@ -486,14 +502,11 @@ Examples:
 Examples:
   fizzctl macro --key CapsLock rgb
   fizzctl macro --key LAlt --delay-ms 50 --cycles 3 hello
-  fizzctl macro --cfg cfgs/cfg_final.ini --key A --until-released abc
 """.rstrip(),
                         formatter_class=argparse.RawDescriptionHelpFormatter)
     pm.add_argument("text", help="characters the macro types")
     pm.add_argument("-k", "--key", required=True,
                     help="key to bind (e.g. CapsLock, LAlt, A)")
-    pm.add_argument("--cfg", help="rebuild the keymap from this Cfg.ini "
-                                  "(default: baked stock keymap)")
     pm.add_argument("--delay-ms", type=int, default=30,
                     help="delay between macro events (default 30)")
     pm.add_argument("--cycles", type=int, default=1,
@@ -502,6 +515,18 @@ Examples:
                     help="cycle until the bound key is released")
     pm.add_argument("--burst-ms", type=int, default=30,
                     help="delay between USB frames (default 30)")
+
+    pres = sub.add_parser("restore",
+                        help="restore the stock keymap (flash write)",
+                        description="""
+Writes the packaged stock.ini, restoring the factory keymap while keeping
+your current lighting and any macros you have bound.
+
+Examples:
+  fizzctl restore
+""".rstrip(),
+                        formatter_class=argparse.RawDescriptionHelpFormatter)
+    pres.add_argument("--delay-ms", type=int, default=30)
 
     psudev = sub.add_parser("setup-udev", help="install 99-k617.rules + reload udev (needs root)")
 
@@ -517,7 +542,7 @@ def main(dev: bool = False) -> int:
         "diff": cmd_diff, "export": cmd_export, "replay": cmd_replay,
         "rgb": cmd_rgb, "effect": cmd_effect, "key": cmd_key,
         "paint": cmd_paint, "animate": cmd_animate, "keymap": cmd_keymap,
-        "macro": cmd_macro, "setup-udev": cmd_setup_udev,
+        "restore": cmd_restore, "macro": cmd_macro, "setup-udev": cmd_setup_udev,
     }[args.cmd]
     return fn(args)
 

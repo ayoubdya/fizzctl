@@ -253,6 +253,28 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(bytes(frames[-2][616:620]), bytes((0x10, 0x00, 0x01, 0x00)))
 
     @patch("time.sleep")
+    @patch("fizzctl.cli.open_device")
+    def test_cli_restore(self, open_device, sleep):
+        from fizzctl.cli import _stock_cfg
+
+        dev = Mock(debug=False)
+        dev.get_feature.return_value = b"\x00\x00\x00\x00\x00" + \
+            bytes.fromhex("deadbeef") + bytes(1023)
+        open_device.return_value = dev
+        parser = cli._build_parser(False)
+
+        rc = cli.cmd_restore(parser.parse_args(["restore"]))
+        self.assertEqual(rc, 0)
+        frames = [c.args[0] for c in dev.send_feature.call_args_list][4:]
+        self.assertEqual(len(frames), 7)
+        self.assertEqual(frames[-2][:4], bytes.fromhex("0604d400"))  # keymap block
+        self.assertEqual(frames[2][5:9], bytes.fromhex("deadbeef"))   # lighting kept
+        # the packaged stock.ini is a real, parseable Cfg.ini
+        from fizzctl.cfg import CfgIni
+        self.assertTrue(os.path.exists(_stock_cfg()))
+        self.assertTrue(CfgIni(_stock_cfg()).keys)
+
+    @patch("time.sleep")
     def test_read_lighting_restores_headers(self, sleep):
         from fizzctl.hid import read_lighting
 

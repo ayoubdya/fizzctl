@@ -235,6 +235,20 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(state.alloc_slot(st, "CapsLk"), 0)   # reuse existing
         self.assertEqual(state.alloc_slot(st, "LAlt"), 1)     # next free
 
+    def test_find_binding_and_apply(self):
+        from fizzctl.cli import _apply_bindings
+        from fizzctl.macro import bind_macro, find_binding
+
+        base = bytearray(blobs.CONST_KEYMAP)
+        self.assertIsNone(find_binding(base, 0, 1))                 # none yet
+        bind_macro(base, 0xE2, 0, 1)                                # LAlt -> slot0
+        self.assertEqual(base[660:664], bytes((0x10, 0x00, 0x01, 0x00)))
+        self.assertEqual(find_binding(base, 0, 1), 660)             # echoed back
+
+        # a read-back that already contains the binding is not "missed"
+        self.assertEqual(_apply_bindings(base, {"LAlt": {"slot": 0, "mode": 1}}), [])
+        self.assertEqual(_apply_bindings(base, {"Nope": {"slot": 1, "mode": 1}}), ["Nope"])
+
     @patch("time.sleep")
     @patch("fizzctl.cli.open_device")
     def test_cli_keymap_reapplies_macros(self, open_device, sleep):

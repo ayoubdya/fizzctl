@@ -129,6 +129,26 @@ def bind_macro(keymap: bytearray, hid: int, slot: int,
     return None
 
 
+def find_binding(keymap, slot: int, mode: int = MODE_CYCLES) -> int | None:
+    """Offset of a ``10 00 <mode> <slot>`` binding already in ``keymap``.
+
+    The device echoes macro bindings back as ``10`` records instead of the
+    key's base output, so a read-back keymap can contain the binding even
+    though :func:`bind_macro` cannot rediscover it.  Used to treat an existing
+    binding as "already applied" rather than a failed re-apply.
+    """
+    rec = bytes((ACTION_MACRO, 0x00, mode & 0xFF, slot & 0xFF))
+    for start, count in (
+        (REGION_B_BASE, (REGION_B_END - REGION_B_BASE) // 4),
+        (REGION_A_BASE, (REGION_B_BASE - REGION_A_BASE) // 4),
+    ):
+        for pos in range(count):
+            off = start + pos * 4
+            if keymap[off:off + 4] == rec:
+                return off
+    return None
+
+
 # --------------------------------------------------------------------------
 # key / character tables
 # --------------------------------------------------------------------------

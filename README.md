@@ -39,6 +39,8 @@ the trigger did not pick it up.
 | `key` | Paint a single key | yes |
 | `paint` | Paint multiple keys at once | yes |
 | `keymap` | Write the keymap from a Cfg.ini | yes |
+| `macro` | Bind a key that types text on press | yes |
+| `restore` | Reset to the factory keymap, lighting and macros | yes |
 | `animate` | Host-streamed animation (volatile) | no |
 
 ## Examples
@@ -59,6 +61,30 @@ Apply the full keymap (bindings, lighting zones, function keys) from a
 ```bash
 fizzctl keymap Cfg.ini
 ```
+
+- A `keymap` write keeps your current effect/color/brightness and any macros
+  you have bound.
+- `fizzctl restore` does the opposite: it resets the keyboard to factory
+  state by writing the packaged stock keymap and lighting and wiping every
+  macro.
+
+### Macros
+
+Bind a key to a macro that types text. Each macro gets its own slot (up to
+8), and previously bound macros are kept — the device's current keymap is
+read and reused as the base, and your lighting is untouched:
+
+```bash
+fizzctl macro --key CapsLock rgb          # type "rgb" each press
+fizzctl macro --key LAlt --delay-ms 50 --cycles 3 hello
+fizzctl macro --key 2 --until-released aaaa
+```
+
+Options: `--delay-ms` (default 30) is the delay between typed events,
+`--cycles` (default 1) plays the macro that many times per press, and
+`--until-released` types in a loop until the key is let go. Macros and their
+bindings are remembered in a local state file (`$XDG_STATE_HOME/fizzctl/`)
+so later macro/keymap writes never drop them. `restore` clears them all.
 
 ### Set the whole board to one color
 
@@ -132,11 +158,11 @@ fizzctl-dev list
 
 ## How the RGB paths work
 
-**Flash writes** (`rgb`, `key`, `paint`, `effect`, `keymap`) send a 4-5 frame
-burst through the vendor HID interface (`258a:0049`, interface 1, usage page
-`0xFF00`). The sequence ends with a `5AA5` magic commit that writes to flash.
-Colors persist across reboots. Keys not listed in a `key` or `paint` canvas
-turn off.
+**Flash writes** (`rgb`, `key`, `paint`, `effect`, `keymap`, `macro`,
+`restore`) send a burst through the vendor HID interface (`258a:0049`,
+interface 1, usage page `0xFF00`). The sequence ends with a `5AA5` magic
+commit that writes to flash. Colors persist across reboots. Keys not listed
+in a `key` or `paint` canvas turn off.
 
 **Animations** (`animate`) stream 382-byte per-key reports at the requested
 frame rate with no flash commit. They are host-side only and lost on

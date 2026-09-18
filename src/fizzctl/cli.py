@@ -131,12 +131,22 @@ def _live_keymap(dev, debug: bool = False) -> bytes:
 
 def _apply_bindings(keymap: bytearray, bindings: dict) -> list[str]:
     """Patch every cached macro binding into ``keymap`` in place; return the
-    keys that could not be found."""
-    from .macro import NAME_TO_HID, bind_macro
+    keys that could not be found.
+
+    A binding the device already has (a ``10`` record echoed in the read-back)
+    counts as applied even though :func:`bind_macro` cannot rediscover it.
+    """
+    from .macro import NAME_TO_HID, bind_macro, find_binding
     missed = []
     for key, info in bindings.items():
         hid = NAME_TO_HID.get(key)
-        if hid is None or bind_macro(keymap, hid, int(info["slot"]), int(info["mode"])) is None:
+        if hid is None:
+            missed.append(key)
+            continue
+        slot = int(info["slot"])
+        mode = int(info["mode"])
+        if bind_macro(keymap, hid, slot, mode) is None \
+                and find_binding(keymap, slot, mode) is None:
             missed.append(key)
     return missed
 

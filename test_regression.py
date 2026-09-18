@@ -341,7 +341,7 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(enc._fn_output(idx),
                              bytes([4, 0, 0, MEDIA_CODES[code].wire]))
         # the codes our shipped cfgs use, all wired to a consumer usage
-        self.assertEqual(sorted(seen), [0x22, 0x26, 0x27, 0x28])
+        self.assertEqual(sorted(seen), [0x22, 0x24, 0x25, 0x26, 0x27, 0x28])
         # the rest of the Redragon media enum, by USB HID Consumer usage
         self.assertEqual([MEDIA_CODES[c].wire for c in (0x23, 0x24, 0x25)],
                          [0xb7, 0xb6, 0xb5])  # stop, previous, next

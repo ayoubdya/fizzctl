@@ -7,4 +7,4 @@ by :func:`main_dev` via the ``fizzctl-dev`` console script.
 from .cli import main, main_dev
 
 __all__ = ["main", "main_dev"]
-__version__ = "0.3.0"
+__version__ = "0.4.0"

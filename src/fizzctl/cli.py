@@ -9,7 +9,7 @@ User commands (``fizzctl``):
     fizzctl keymap <Cfg.ini>           # write full keymap from Cfg.ini (FLASH WRITE)
     fizzctl restore                  # restore factory keymap+lighting (FLASH WRITE)
     fizzctl macro --key K <text>     # bind a macro that types text (FLASH WRITE)
-    fizzctl read-macro               # dev: probe the on-device macro table read
+    fizzctl macro --read             # dump on-device macros + their key bindings
     fizzctl setup-udev               # install 99-k617.rules (needs root)
 
 Dev commands (``fizzctl-dev``, reverse-engineering toolkit):
@@ -292,17 +292,21 @@ def cmd_restore(args):
     return 0
 
 
-def cmd_read_macro(args):
+def cmd_macro_read(args):
     """Read the on-device macro table back (dev tool).
 
-    Probes the macro read path (selector ``05 85 dc``, mirrors the keymap
-    read ``05 84 d4``) and decodes whichever slots the firmware returns.
+    Shows every non-empty slot with the key(s) bound to it (a slot can be
+    shared) and the events it types.  Since the keymap is read alongside the
+    macro table, bindings are identified by the stock record at their live
+    offset (the CONST_KEYMAP oracle), and keys bound with ``--until-released``
+    are flagged as such.
 
     Examples:
-        fizzctl read-macro
+        fizzctl macro --read
     """
-    from .hid import read_macro
-    from .macro import MAX_SLOTS, NAME_TO_HID, SLOT_BASE, SLOT_STRIDE, decode_slot
+    from .blobs import CONST_KEYMAP
+    from .macro import MAX_SLOTS, MODE_UNTIL_RELEASED, NAME_TO_HID, \
+        SLOT_BASE, SLOT_STRIDE, collect_bindings, decode_slot
 
     names = {hid: name for name, hid in NAME_TO_HID.items()}
     try:
@@ -313,8 +317,19 @@ def cmd_read_macro(args):
         return 1
     try:
         frame = read_macro(dev)
+        keymap = read_keymap(dev)
     finally:
         dev.close()
+
+    binds: dict[int, list[tuple[str, int]]] = {}
+    for off, mode, slot in collect_bindings(keymap):
+        rec = CONST_KEYMAP[off:off + 4]
+        hid = rec[3] if rec[0] in (0x00, 0x06) else None
+        label = (names.get(hid) if hid else None) or (f"key 0x{hid:02x}" if hid else f"@+{off:#06x}")
+        if mode & MODE_UNTIL_RELEASED:
+            label += " (until released)"
+        binds.setdefault(slot, []).append(label)
+
     print(f"macro table header: {frame[:5].hex(' ')}")
     found = 0
     for i in range(MAX_SLOTS):
@@ -323,9 +338,15 @@ def cmd_read_macro(args):
         if not events and cycles == 0:
             continue
         found += 1
+        line = f"slot{i}:"
+        if cycles:
+            line += f" cycles={cycles}"
+        if i in binds:
+            line += "  bound to: " + ", ".join(binds[i])
+        print(line)
         ev = " ".join(f"{d}{names.get(h, f'#{h:02x}')}{'R' if r else 'P'}"
                       for d, h, r in events)
-        print(f"slot{i}: cycles={cycles}  {ev}")
+        print(f"  {ev}")
     if not found:
         print("  (no non-empty slots read back)")
     print(f"({found} slot(s) non-empty)")
@@ -408,6 +429,8 @@ def cmd_macro(args):
     Examples:
         fizzctl macro --key CapsLock rgb
         fizzctl macro --key LAlt --delay-ms 50 --cycles 3 hello
+        fizzctl macro --until-released --key 2 aaaa
+        fizzctl macro --read            # dump the on-device macro table + bindings
         fizzctl macro --remove-all
     """
     from .macro import (
@@ -416,6 +439,8 @@ def cmd_macro(args):
         text_events,
     )
 
+    if args.read:
+        return cmd_macro_read(args)
     if args.remove_all:
         return cmd_macro_remove_all(args)
     if not args.key:
@@ -635,17 +660,21 @@ Examples:
     prs.add_argument("--delay-ms", type=int, default=30)
 
     pm = sub.add_parser("macro",
-                        help="bind a key that types TEXT, or --remove-all (flash write)",
+                        help="bind a key that types TEXT, --remove-all, or --read (flash write)",
                         description="""
 Examples:
   fizzctl macro --key CapsLock rgb
   fizzctl macro --key LAlt --delay-ms 50 --cycles 3 hello
+  fizzctl macro --until-released --key 2 aaaa
+  fizzctl macro --read            # dump on-device macros + their key bindings
   fizzctl macro --remove-all
 """.rstrip(),
                         formatter_class=argparse.RawDescriptionHelpFormatter)
     pm.add_argument("text", nargs="?", help="characters the macro types")
     pm.add_argument("-k", "--key",
                     help="key to bind (e.g. CapsLock, LAlt, A)")
+    pm.add_argument("--read", action="store_true",
+                    help="read the on-device macro table back, showing each slot's key binding")
     pm.add_argument("--remove-all", action="store_true",
                     help="unbind every macro and wipe all macro slots")
     pm.add_argument("--delay-ms", type=int, default=30,
@@ -670,18 +699,7 @@ Examples:
                         formatter_class=argparse.RawDescriptionHelpFormatter)
     pres.add_argument("--delay-ms", type=int, default=30)
 
-    prd = sub.add_parser("read-macro",
-                        help="read the on-device macro table back (dev tool)",
-                        description="""
-Reads the macro table (selector 05 85 dc) and decodes the slots the firmware
-returns.
-
-Examples:
-  fizzctl read-macro
-""".rstrip(),
-                        formatter_class=argparse.RawDescriptionHelpFormatter)
-
-    psudev = sub.add_parser("setup-udev", help="install 99-k617.rules + reload udev (needs root)")
+    prd = sub.add_parser("setup-udev", help="install 99-k617.rules + reload udev (needs root)")
 
     return p
 
@@ -695,7 +713,7 @@ def main(dev: bool = False) -> int:
         "diff": cmd_diff, "export": cmd_export, "replay": cmd_replay,
         "rgb": cmd_rgb, "effect": cmd_effect, "key": cmd_key,
         "paint": cmd_paint, "animate": cmd_animate, "keymap": cmd_keymap,
-        "restore": cmd_restore, "macro": cmd_macro, "read-macro": cmd_read_macro,
+        "restore": cmd_restore, "macro": cmd_macro,
         "setup-udev": cmd_setup_udev,
     }[args.cmd]
     return fn(args)

@@ -1,7 +1,7 @@
 [project]
 name = "fizzctl"
-version = "0.3.0"
-description = "Control a Redragon K617 Fizz keyboard on Linux: solid colors, 22 firmware-native RGB effects, per-key painting, live animations, and Cfg.ini keymap restore — no vendor software required"
+version = "0.4.0"
+description = "Control a Redragon K617 Fizz keyboard on Linux: solid colors, 22 firmware-native RGB effects, per-key painting, live animations, on-device key macros, and Cfg.ini keymap restore — no vendor software required"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Ayoub Dya", email = "ayoubdya@gmail.com" }]

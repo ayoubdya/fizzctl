@@ -18,23 +18,23 @@ class FakeK617:
         self.keymap = bytearray(blobs.CONST_KEYMAP)
         self.macro = bytearray(build_macro_frame({}))
         self.writes = []
-        self._reads = 0
+        self._selector = b""
         self.debug = False
         self.closed = False
 
     def get_feature(self, rid, size):
-        self._reads += 1
-        n = self._reads
-        if n % 6 == 5:
+        if self._selector == bytes.fromhex("0584d4000000"):
             return bytes(self.keymap)
-        if n % 6 == 0:
+        if self._selector == bytes.fromhex("0585dc000000"):
             return bytes(self.macro)
         return bytes(1032)
 
     def send_feature(self, data):
         data = bytes(data)
         self.writes.append(data)
-        if data[:1] == b"\x06":
+        if data[:1] == b"\x05":
+            self._selector = data  # a read INIT selects the block to read next
+        elif data[:1] == b"\x06":
             if data[1:2] == b"\x05":       # 06 05 dc macro table
                 self.macro = bytearray(data)
             elif data[1:2] == b"\x04":     # 06 04 d4 keymap block
@@ -374,6 +374,30 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(frames[-3][:3], bytes.fromhex("0605dc"))
         self.assertEqual(frames[-3][9:22], bytes.fromhex("011e159e151e0a9e0a1e059e05"))
         self.assertEqual(bytes(frames[-2][616:620]), bytes((0x10, 0x00, 0x01, 0x00)))
+
+    @patch("time.sleep")
+    @patch("fizzctl.cli.open_device")
+    def test_cli_macro_read(self, open_device, sleep):
+        import io
+        from contextlib import redirect_stdout
+
+        dev = FakeK617()
+        open_device.return_value = dev
+        parser = cli._build_parser(False)
+
+        self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--key", "CapsLk", "rgb"])), 0)
+        self.assertEqual(cli.cmd_macro(parser.parse_args(
+            ["macro", "--key", "LAlt", "--until-released", "hi"])), 0)
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = cli.cmd_macro_read(parser.parse_args(["macro", "--read"]))
+        self.assertEqual(rc, 0)
+        text = out.getvalue()
+        self.assertIn("header: 06 05 dc 00 40", text)
+        self.assertIn("slot0: cycles=1  bound to: CapsLock", text)
+        self.assertIn("slot1: cycles=1  bound to: LAlt (until released)", text)
+        self.assertIn("(2 slot(s) non-empty)", text)
 
     @patch("time.sleep")
     @patch("fizzctl.cli.open_device")

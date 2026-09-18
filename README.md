@@ -1,7 +1,8 @@
 # fizzctl
 
-Linux tool for controlling the Redragon K617 Fizz keyboard's RGB lighting
-and restoring keymaps from `Cfg.ini` files.
+Control a Redragon K617 Fizz keyboard on Linux: solid colors, 22 firmware-native
+RGB effects, per-key painting, live animations, on-device key macros with a
+readable back, and `Cfg.ini` keymap restore — no vendor software required.
 
 ## Install
 
@@ -39,9 +40,8 @@ the trigger did not pick it up.
 | `key` | Paint a single key | yes |
 | `paint` | Paint multiple keys at once | yes |
 | `keymap` | Write the keymap from a Cfg.ini | yes |
-| `macro` | Bind a key that types text on press | yes |
+| `macro` | Bind a key that types text, `--remove-all`, or `--read` | yes |
 | `restore` | Reset to the factory keymap, lighting and macros | yes |
-| `read-macro` | Dump the on-device macro table (dev tool) | no |
 | `animate` | Host-streamed animation (volatile) | no |
 
 ## Examples
@@ -87,8 +87,9 @@ Options: `--delay-ms` (default 30) is the delay between typed events,
 straight back off the keyboard's flash: each write reads the current keymap
 and macro table first, patches them, and writes the full table back — so
 later macro/keymap writes never drop your existing macros, and nothing is
-saved on the host. `fizzctl read-macro` dumps the on-device table for
-verification. To undo:
+saved on the host. `fizzctl macro --read` dumps the on-device table back,
+each slot shown with the key(s) bound to it and whether it repeats until the
+key is released. To undo:
 
 ```bash
 fizzctl macro --remove-all          # unbind every macro, keep keymap + lighting

@@ -9,6 +9,7 @@ User commands (``fizzctl``):
     fizzctl keymap <Cfg.ini>           # write full keymap from Cfg.ini (FLASH WRITE)
     fizzctl restore                  # restore factory keymap+lighting (FLASH WRITE)
     fizzctl macro --key K <text>     # bind a macro that types text (FLASH WRITE)
+    fizzctl read-macro               # dev: probe the on-device macro table read
     fizzctl setup-udev               # install 99-k617.rules (needs root)
 
 Dev commands (``fizzctl-dev``, reverse-engineering toolkit):
@@ -328,6 +329,48 @@ def cmd_restore(args):
         dev.close()
     state.save({"slots": {}, "bindings": {}})
     print("restored factory keymap, lighting and macros")
+    return 0
+
+
+def cmd_read_macro(args):
+    """Read the on-device macro table back (dev tool).
+
+    Probes the macro read path (selector ``05 85 dc``, mirrors the keymap
+    read ``05 84 d4``) and decodes whichever slots the firmware returns.
+    The keyboard may answer with a fixed/factory table instead of the live
+    one — that answer is exactly what this command is for.
+
+    Examples:
+        fizzctl read-macro
+    """
+    from .hid import read_macro
+    from .macro import MAX_SLOTS, NAME_TO_HID, SLOT_BASE, SLOT_STRIDE, decode_slot
+
+    names = {hid: name for name, hid in NAME_TO_HID.items()}
+    try:
+        dev = open_device(debug=args.debug)
+    except NoDeviceError:
+        return 1
+    if dev is None:
+        return 1
+    try:
+        frame = read_macro(dev)
+    finally:
+        dev.close()
+    print(f"macro table header: {frame[:5].hex(' ')}")
+    found = 0
+    for i in range(MAX_SLOTS):
+        base = SLOT_BASE + i * SLOT_STRIDE
+        cycles, events = decode_slot(frame[base:base + SLOT_STRIDE])
+        if not events and cycles == 0:
+            continue
+        found += 1
+        ev = " ".join(f"{d}{names.get(h, f'#{h:02x}')}{'R' if r else 'P'}"
+                      for d, h, r in events)
+        print(f"slot{i}: cycles={cycles}  {ev}")
+    if not found:
+        print("  (no non-empty slots read back)")
+    print(f"({found} slot(s) non-empty)")
     return 0
 
 
@@ -662,6 +705,18 @@ Examples:
                         formatter_class=argparse.RawDescriptionHelpFormatter)
     pres.add_argument("--delay-ms", type=int, default=30)
 
+    prd = sub.add_parser("read-macro",
+                        help="read the on-device macro table back (dev tool)",
+                        description="""
+Probes the macro read path (selector 05 85 dc) and decodes the slots the
+firmware returns.  The device may answer with a factory/demo table instead
+of the live one; that answer is exactly what this command is for.
+
+Examples:
+  fizzctl read-macro
+""".rstrip(),
+                        formatter_class=argparse.RawDescriptionHelpFormatter)
+
     psudev = sub.add_parser("setup-udev", help="install 99-k617.rules + reload udev (needs root)")
 
     return p
@@ -676,7 +731,8 @@ def main(dev: bool = False) -> int:
         "diff": cmd_diff, "export": cmd_export, "replay": cmd_replay,
         "rgb": cmd_rgb, "effect": cmd_effect, "key": cmd_key,
         "paint": cmd_paint, "animate": cmd_animate, "keymap": cmd_keymap,
-        "restore": cmd_restore, "macro": cmd_macro, "setup-udev": cmd_setup_udev,
+        "restore": cmd_restore, "macro": cmd_macro, "read-macro": cmd_read_macro,
+        "setup-udev": cmd_setup_udev,
     }[args.cmd]
     return fn(args)
 

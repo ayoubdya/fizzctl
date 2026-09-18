@@ -241,3 +241,13 @@ def read_keymap(dev: K617) -> bytes:
     base layer is live, so it does contain your current Cfg.ini remaps.
     """
     return _read_block(dev, "0584d4000000", bytes.fromhex("0604d40040"))
+
+
+def read_macro(dev: K617) -> bytes:
+    """Read the device's macro table block, if the firmware exposes it.
+
+    Mirrors the keymap read (``05 84 d4``) using the macro block id ``dc``.
+    The framework may return a fixed/factory table instead of the live one;
+    that is exactly what :func:`fizzctl.cli.cmd_read_macro` is for probing.
+    """
+    return _read_block(dev, "0585dc000000", bytes.fromhex("0605dc0040"))

@@ -262,6 +262,23 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(_strip_bindings(base, cache), 1)
         self.assertEqual(base[660:664], bytes((0x06, 0x00, 0x00, 0xE2)))
 
+    def test_decode_macro_frame_from_capture(self):
+        from fizzctl.capture import load_tshark_json, significant
+        from fizzctl.macro import decode_macro_frame
+
+        frames = significant(
+            load_tshark_json("captures/_1_adding_macro_capslock_before_applying.json"))
+        mf = next(f.data for f in frames if f.data[0] == 6 and f.data[1] == 5)
+        slots = decode_macro_frame(mf)
+        cycles, events = slots[0]
+        self.assertEqual(cycles, 1)
+        # the OEM "newmacro" recording: A(94) A(16) B(93) B(32) C(78) C(3)
+        self.assertEqual(events, [
+            (94, 0x04, False), (16, 0x04, True),
+            (93, 0x05, False), (32, 0x05, True),
+            (78, 0x06, False), (3, 0x06, True),
+        ])
+
     def test_macro_slot_helpers(self):
         from fizzctl.macro import SLOT_BASE, build_macro_frame, encode_slot
 

@@ -80,6 +80,32 @@ def build_macro_frame(slots: dict[int, bytes]) -> bytes:
     return bytes(frame)
 
 
+def decode_slot(slot: bytes) -> tuple[int, list[tuple[int, int, bool]]]:
+    """Decode a 128-byte slot into ``(cycles, events)``.
+
+    ``events`` are ``(delay_ms, hid, release)`` triples in on-wire order.
+    """
+    cycles = slot[0]
+    events = []
+    off = 1
+    while off + 1 < len(slot) and slot[off] != 0:
+        b0 = slot[off]
+        events.append((b0 & MAX_DELAY_MS, slot[off + 1], bool(b0 & 0x80)))
+        off += 2
+    return cycles, events
+
+
+def decode_macro_frame(frame: bytes) -> dict[int, tuple[int, list[tuple[int, int, bool]]]]:
+    """Decode every non-empty slot of a 1032-byte macro frame."""
+    slots = {}
+    for i in range(MAX_SLOTS):
+        base = SLOT_BASE + i * SLOT_STRIDE
+        slot = frame[base:base + SLOT_STRIDE]
+        if any(slot):
+            slots[i] = decode_slot(slot)
+    return slots
+
+
 def encode_macro_frame(slots: list[tuple[int, list[bytes]]]) -> bytes:
     """Build the 1032-byte ``06 05 dc`` frame.
 

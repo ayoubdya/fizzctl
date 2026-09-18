@@ -106,15 +106,13 @@ def text_events(text: str, delay_ms: int = 30) -> list[bytes]:
     return events
 
 
-def bind_macro(keymap: bytearray, hid: int, slot: int,
-               mode: int = MODE_CYCLES) -> int | None:
-    """Point the key whose base output is ``hid`` at macro ``slot``.
+def locate_key(keymap, hid: int) -> int | None:
+    """Offset of the key whose base output is ``hid`` (or ``None``).
 
-    Patches ``keymap`` in place and returns the record offset, or ``None`` if
-    no matching base-layer key was found.  Region B (FN keys) is searched
-    before the column records so the base-layer output wins.
+    Mirrors :func:`bind_macro`'s search order so callers can capture the
+    original record before a binding overwrites it.  Region B (FN keys) wins
+    over the column records.
     """
-    rec = bytes((ACTION_MACRO, 0x00, mode & 0xFF, slot & 0xFF))
     for start, count in (
         (REGION_B_BASE, (REGION_B_END - REGION_B_BASE) // 4),
         (REGION_A_BASE, (REGION_B_BASE - REGION_A_BASE) // 4),
@@ -124,9 +122,22 @@ def bind_macro(keymap: bytearray, hid: int, slot: int,
             if keymap[off:off + 4] == b"\x00\x00\x00\x00":
                 continue                       # unassigned slot, never a match
             if keymap[off] in (0x00, 0x06) and keymap[off + 3] == (hid & 0xFF):
-                keymap[off:off + 4] = rec
                 return off
     return None
+
+
+def bind_macro(keymap: bytearray, hid: int, slot: int,
+               mode: int = MODE_CYCLES) -> int | None:
+    """Point the key whose base output is ``hid`` at macro ``slot``.
+
+    Patches ``keymap`` in place and returns the record offset, or ``None`` if
+    no matching base-layer key was found.
+    """
+    off = locate_key(keymap, hid)
+    if off is None:
+        return None
+    keymap[off:off + 4] = bytes((ACTION_MACRO, 0x00, mode & 0xFF, slot & 0xFF))
+    return off
 
 
 def find_binding(keymap, slot: int, mode: int = MODE_CYCLES) -> int | None:

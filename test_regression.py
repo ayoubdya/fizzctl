@@ -208,7 +208,59 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--key", "Nope", "x"])), 1)
         self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--key", "A", "@"])), 1)
         self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--key", "A", "", "--cycles", "0"])), 1)
+        self.assertEqual(cli.cmd_macro(parser.parse_args(["macro"])), 1)          # missing key
         open_device.assert_not_called()
+
+    @patch("time.sleep")
+    @patch("fizzctl.cli.open_device")
+    def test_cli_macro_remove_all(self, open_device, sleep):
+        from fizzctl import state
+
+        dev = Mock(debug=False)
+        dev.get_feature.return_value = bytes(blobs.CONST_KEYMAP)
+        open_device.return_value = dev
+        parser = cli._build_parser(False)
+        self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--key", "LAlt", "hi"])), 0)
+
+        # a read-back that echoes the binding back (the key is already bound)
+        mounted = bytearray(blobs.CONST_KEYMAP)
+        mounted[660:664] = bytes((0x10, 0x00, 0x01, 0x00))
+        dev.reset_mock()
+        dev.get_feature.side_effect = [
+            bytes(blobs.CONST_MODE), bytes(blobs.CONST_CANVAS),
+            bytes(blobs.CONST_ROUTING), bytes(blobs.CONST_EXEC),
+            bytes(mounted),
+        ]
+        rc = cli.cmd_macro_remove_all(parser.parse_args(["macro", "--remove-all"]))
+        self.assertEqual(rc, 0)
+        frames = [c.args[0] for c in dev.send_feature.call_args_list][5:]
+        self.assertEqual([f[:3] for f in frames], [
+            bytes.fromhex("0583b6"), bytes.fromhex("0608b8"),
+            bytes.fromhex("0609bc"), bytes.fromhex("0609c0"),
+            bytes.fromhex("0605dc"), bytes.fromhex("0604d4"),
+            bytes.fromhex("0603b6"),
+        ])
+        self.assertEqual(frames[4][9:], bytes(1032 - 9))                      # slots wiped
+        self.assertEqual(frames[5][660:664], bytes((0x06, 0x00, 0x00, 0xE2)))  # restored
+        self.assertEqual(state.load(), {"slots": {}, "bindings": {}})          # cache cleared
+
+    @patch("fizzctl.cli.open_device")
+    def test_cli_macro_remove_all_empty(self, open_device):
+        parser = cli._build_parser(False)
+        self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--remove-all"])), 0)
+        open_device.assert_not_called()
+
+    def test_strip_bindings_fallback(self):
+        from fizzctl.cli import _strip_bindings
+        from fizzctl.macro import bind_macro
+
+        base = bytearray(blobs.CONST_KEYMAP)
+        bind_macro(base, 0xE2, 0, 1)              # legacy binding: no original cached
+        self.assertEqual(base[660:664], bytes((0x10, 0x00, 0x01, 0x00)))
+        cache = {"slots": {"0": "00" * 128},
+                 "bindings": {"LAlt": {"slot": 0, "mode": 1}}}
+        self.assertEqual(_strip_bindings(base, cache), 1)
+        self.assertEqual(base[660:664], bytes((0x06, 0x00, 0x00, 0xE2)))
 
     def test_macro_slot_helpers(self):
         from fizzctl.macro import SLOT_BASE, build_macro_frame, encode_slot

@@ -84,7 +84,12 @@ Options: `--delay-ms` (default 30) is the delay between typed events,
 `--cycles` (default 1) plays the macro that many times per press, and
 `--until-released` types in a loop until the key is let go. Macros and their
 bindings are remembered in a local state file (`$XDG_STATE_HOME/fizzctl/`)
-so later macro/keymap writes never drop them. `restore` clears them all.
+so later macro/keymap writes never drop them. To undo:
+
+```bash
+fizzctl macro --remove-all          # unbind every macro, keep keymap + lighting
+fizzctl restore                     # full factory reset (keymap, lighting, macros)
+```
 
 ### Set the whole board to one color
 

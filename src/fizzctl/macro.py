@@ -196,6 +196,71 @@ def slots_in_frame(frame: bytes) -> dict[int, bytes]:
     return slots
 
 
+def relocate_bindings(live: bytes, target: bytearray,
+                      oracle: bytes | None = None) -> tuple[bytes, list[str]]:
+    """Re-apply the macro bindings read from ``live`` onto ``target``.
+
+    Bindings are matched to their **physical key** by the live layout, then
+    written at that key's position in ``target``.  Layouts are free to move
+    keys (e.g. an ``Alt`` that is an FN-layered key at offset 660 in one
+    layout and a plain column-17 key at offset 76 in another); copying raw
+    offsets would drop the binding onto a different key.
+
+    A binding below the FN area (``< 0x218``) is a plain key, its column is
+    the offset's own column.  A binding in the FN area is the key whose column
+    record points at that FN slot (``02 00 00 <slot>``).  If the live layout
+    can't identify the key (an orphan binding left behind by an earlier
+    layout—nothing points at its FN slot), ``oracle`` (a captured keymap, e.g.
+    ``CONST_KEYMAP``) is consulted at the same offset and the key located in
+    ``target`` by its HID.
+    """
+    target = bytearray(target)
+    warnings: list[str] = []
+    n = 0
+    for off, mode, slot in collect_bindings(live):
+        if off < REGION_B_BASE:
+            col = (off - REGION_A_BASE) // 4
+        else:
+            fp = (off - REGION_B_BASE) // 4
+            cols = [
+                c for c in range((REGION_B_BASE - REGION_A_BASE) // 4)
+                if live[REGION_A_BASE + c * 4] == 0x02
+                and live[REGION_A_BASE + c * 4 + 3] == fp
+            ]
+            col = cols[0] if len(cols) == 1 else None
+        if col is not None:
+            rec_off = REGION_A_BASE + col * 4
+            kind = target[rec_off]
+            if kind == 0x02:                     # FN-layered key here too -> follow it
+                dst = REGION_B_BASE + target[rec_off + 3] * 4
+            elif kind in (0x00, 0x06):           # plain key -> its own column record
+                dst = rec_off
+            else:
+                warnings.append(
+                    f"macro binding @+{off:#06x}: column {col} is not bindable in this "
+                    f"keymap (record {target[rec_off:rec_off + 4].hex(' ')})")
+                continue
+        elif oracle is not None:
+            rec = oracle[off:off + 4]
+            if rec[0] in (0x00, 0x06):
+                dst = locate_key(target, rec[3])
+                warnings.append(
+                    f"macro binding @+{off:#06x}: located as key "
+                    f"0x{rec[3]:02x} (moved from @+{off:#06x} to @+{dst:#06x})" if dst is not None
+                    else f"macro binding @+{off:#06x}: cannot identify its key")
+                if dst is None:
+                    continue
+            else:
+                warnings.append(f"macro binding @+{off:#06x}: cannot identify its key")
+                continue
+        else:
+            warnings.append(f"macro binding @+{off:#06x}: cannot identify its key")
+            continue
+        target[dst:dst + 4] = bytes((ACTION_MACRO, 0x00, mode & 0xFF, slot & 0xFF))
+        n += 1
+    return bytes(target), warnings
+
+
 # --------------------------------------------------------------------------
 # key / character tables
 # --------------------------------------------------------------------------

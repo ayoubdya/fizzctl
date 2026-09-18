@@ -272,6 +272,60 @@ class RegressionTests(unittest.TestCase):
         km[588:592] = bytes((0x10, 0x00, 0x01, 0x00))
         self.assertEqual(collect_bindings(km), [(588, 0x01, 0x00), (616, 0x04, 0x02)])
 
+    def test_relocate_bindings_across_layouts(self):
+        from fizzctl.cfg import CfgIni
+        from fizzctl.keymap import KeymapEncoder
+        from fizzctl.macro import relocate_bindings
+
+        # Most-compatible cfg_final layout: LAlt is FN slot 31 (offset 660) via
+        # column 17's "02 00 00 1f" pointer; "0" is FN slot 10 (offset 576,
+        # aliased as column 142) via column 61's "02 00 00 0a" pointer.
+        live = bytearray(KeymapEncoder(CfgIni("cfgs/cfg_final.ini")).build())
+        live[660:664] = bytes((0x10, 0x00, 0x01, 0x02))
+        live[576:580] = bytes((0x10, 0x00, 0x04, 0x03))
+        stock = bytearray(KeymapEncoder(CfgIni("cfgs/cfg_r2_stock.ini")).build())
+
+        # stock.ini has LAlt as a *plain* column-17 key (offset 76) and slot 31
+        # unused, so copying raw offsets would leave the LAlt binding dead.
+        out, warnings = relocate_bindings(live, stock)
+        self.assertEqual(warnings, [])
+        self.assertEqual(out[76:80], bytes((0x10, 0x00, 0x01, 0x02)))
+        self.assertEqual(out[576:580], bytes((0x10, 0x00, 0x04, 0x03)))
+        self.assertEqual(out[660:664], stock[660:664])
+
+        # round-trip back onto the cfg_final layout restores both bindings
+        final = bytearray(KeymapEncoder(CfgIni("cfgs/cfg_final.ini")).build())
+        out2, warnings = relocate_bindings(out, final)
+        self.assertEqual(warnings, [])
+        self.assertEqual(out2[660:664], bytes((0x10, 0x00, 0x01, 0x02)))
+        self.assertEqual(out2[576:580], bytes((0x10, 0x00, 0x04, 0x03)))
+        self.assertEqual(out2[76:80], final[76:80])  # col17 pointer restored to 02 00 00 1f
+
+    def test_relocate_bindings_orphan_fallback(self):
+        from fizzctl.cfg import CfgIni
+        from fizzctl.keymap import KeymapEncoder
+        from fizzctl.macro import relocate_bindings
+
+        # An older tool copied bindings at raw offsets onto the stock layout,
+        # orphaning the LAlt binding at 660 (nothing in stock points at FN
+        # slot 31).  With a CONST_KEYMAP oracle the orphaned key is still
+        # identified by its HID and re-applied at the target layout's position.
+        final = bytearray(KeymapEncoder(CfgIni("cfgs/cfg_final.ini")).build())
+        stock = bytearray(KeymapEncoder(CfgIni("cfgs/cfg_r2_stock.ini")).build())
+        stock[660:664] = bytes((0x10, 0x00, 0x01, 0x02))
+        stock[576:580] = bytes((0x10, 0x00, 0x04, 0x03))
+        out, warnings = relocate_bindings(stock, final, blobs.CONST_KEYMAP)
+        self.assertEqual(out[660:664], bytes((0x10, 0x00, 0x01, 0x02)))
+        self.assertEqual(out[576:580], bytes((0x10, 0x00, 0x04, 0x03)))
+        self.assertIn("located as key 0xe2", warnings[0])
+
+        # and back onto the stock layout: LAlt lands at plain column 17
+        final[660:664] = bytes((0x10, 0x00, 0x01, 0x02))
+        final[576:580] = bytes((0x10, 0x00, 0x04, 0x03))
+        out2, _ = relocate_bindings(bytearray(final), stock, blobs.CONST_KEYMAP)
+        self.assertEqual(out2[76:80], bytes((0x10, 0x00, 0x01, 0x02)))
+        self.assertEqual(out2[660:664], stock[660:664])
+
     def test_decode_macro_frame_from_capture(self):
         from fizzctl.capture import load_tshark_json, significant
         from fizzctl.macro import decode_macro_frame

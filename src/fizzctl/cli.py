@@ -206,7 +206,8 @@ def cmd_keymap(args):
     Examples:
         fizzctl keymap cfgs/cfg_final.ini
     """
-    from .macro import collect_bindings, slots_in_frame
+    from .blobs import CONST_KEYMAP
+    from .macro import collect_bindings, relocate_bindings, slots_in_frame
 
     keymap = bytearray(KeymapEncoder(CfgIni(args.cfg)).build())
     if len(keymap) != 1032:
@@ -222,10 +223,12 @@ def cmd_keymap(args):
         mode, canvas, routing, exec_ = _live_lighting(dev, args.debug)
         live_km = _live_keymap(dev, args.debug)
         live_mf = _live_macro(dev, args.debug)
-        for off, m, s in collect_bindings(live_km):
-            keymap[off:off + 4] = bytes((0x10, 0x00, m, s))
+        keymap, warnings = relocate_bindings(live_km, keymap, CONST_KEYMAP)
+        for w in warnings:
+            print(f"warning: {w}")
+        nb = len(collect_bindings(live_km))
         if args.debug:
-            print(f"built keymap from {args.cfg} (re-applied {len(collect_bindings(live_km))} macro binding(s))")
+            print(f"built keymap from {args.cfg} (re-applied {nb} macro binding(s))")
         # exact capture order, but with the device's live lighting blocks
         frames = [
             bytes.fromhex("050581000000"),       # INIT

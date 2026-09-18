@@ -7,8 +7,9 @@ All constants come from USB captures of the OEM software:
     a distinct CANVAS, and five byte overrides of CONST_EXEC.
   * RGB_EXEC / RGB_SEC — the whole-board solid-color variant.
   * CONST_KEYMAP — a clean 1032-byte 06 04 d4 keymap block (no macro
-    bindings), captured from the device.  The macro command uses it as the
-    default base; KeymapEncoder can rebuild the same block from a Cfg.ini.
+    bindings), captured from the device.  Used as the fallback base when the
+    device's keymap cannot be read; KeymapEncoder can rebuild the same block
+    from a Cfg.ini.
 """
 
 

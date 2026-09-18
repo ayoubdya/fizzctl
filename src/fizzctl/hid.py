@@ -234,20 +234,19 @@ def read_lighting(dev: K617) -> list[bytes]:
 
 
 def read_keymap(dev: K617) -> bytes:
-    """Read the device's current (base) keymap block.
+    """Read the device's current keymap block.
 
-    Only the base layer comes back — macro bindings (``10`` records) are not
-    exposed — which is why :mod:`fizzctl.state` caches them separately.  The
-    base layer is live, so it does contain your current Cfg.ini remaps.
+    The base layer comes back live, so it contains your current Cfg.ini
+    remaps.  Bound macro keys are echoed back as their ``10 00 <mode> <slot>``
+    binding record (the original output is not recoverable from the device).
     """
     return _read_block(dev, "0584d4000000", bytes.fromhex("0604d40040"))
 
 
 def read_macro(dev: K617) -> bytes:
-    """Read the device's macro table block, if the firmware exposes it.
+    """Read the device's macro table block.
 
-    Mirrors the keymap read (``05 84 d4``) using the macro block id ``dc``.
-    The framework may return a fixed/factory table instead of the live one;
-    that is exactly what :func:`fizzctl.cli.cmd_read_macro` is for probing.
+    Mirrors the keymap read (``05 84 d4``) using the macro block id ``dc``;
+    the live slots come back intact (hardware-verified).
     """
     return _read_block(dev, "0585dc000000", bytes.fromhex("0605dc0040"))

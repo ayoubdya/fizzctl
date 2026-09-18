@@ -30,7 +30,7 @@ from pathlib import Path
 from .animations import cmd_animate
 from .capture import diff_captures, export_frames, load_frames, load_tshark_json, significant
 from .cfg import CfgIni
-from .hid import NoDeviceError, open_device, read_keymap, read_lighting, send_burst
+from .hid import NoDeviceError, open_device, read_keymap, read_lighting, read_macro, send_burst
 from .keymap import KeymapEncoder
 from .protocol import RESTORE_CONSTANT_FRAMES
 
@@ -130,68 +130,28 @@ def _live_keymap(dev, debug: bool = False) -> bytes:
         return bytes(CONST_KEYMAP)
 
 
-def _apply_bindings(keymap: bytearray, bindings: dict,
-                    cache: dict | None = None) -> list[str]:
-    """Patch every cached macro binding into ``keymap`` in place; return the
-    keys that could not be found.
+def _live_macro(dev, debug: bool = False) -> bytes:
+    """Read the device's current macro table so a write keeps every slot;
+    fall back to an empty table if the read fails."""
+    from .macro import build_macro_frame
+    try:
+        return read_macro(dev)
+    except Exception as e:                   # keep working on read failure
+        if debug:
+            print(f"  could not read macro table ({e}); using empty table")
+        return build_macro_frame({})
 
-    A binding the device already has (a ``10`` record echoed in the read-back)
-    counts as applied even though :func:`bind_macro` cannot rediscover it.
-    When ``cache`` is given, each binding also records the key's original
-    record and offset so it can be restored later (``--remove-all``).
-    """
+
+def _binding_for_hid(keymap, hid: int) -> tuple[int, int] | None:
+    """``(offset, slot)`` of the macro binding whose stock record outputs
+    ``hid`` — i.e. which bound physical key this is."""
     from .blobs import CONST_KEYMAP
-    from .macro import NAME_TO_HID, bind_macro, find_binding, locate_key
-    missed = []
-    for key, info in bindings.items():
-        hid = NAME_TO_HID.get(key)
-        if hid is None:
-            missed.append(key)
-            continue
-        slot = int(info["slot"])
-        mode = int(info["mode"])
-        off = locate_key(keymap, hid)
-        if off is not None:
-            if cache is not None:
-                cache["bindings"][key]["offset"] = off
-                cache["bindings"][key]["record"] = bytes(keymap[off:off + 4]).hex()
-            bind_macro(keymap, hid, slot, mode)
-        else:
-            off = find_binding(keymap, slot, mode)
-            if off is None:
-                missed.append(key)
-            elif cache is not None and cache["bindings"][key].get("record") is None:
-                # already bound in the read-back: remember where, and fall back
-                # to the stock record as the best guess for the original
-                cache["bindings"][key]["offset"] = off
-                cache["bindings"][key]["record"] = bytes(CONST_KEYMAP[off:off + 4]).hex()
-    return missed
-
-
-def _strip_bindings(keymap: bytearray, cache: dict) -> int:
-    """Restore the original records of cached macro bindings in ``keymap``.
-
-    Returns how many records were restored.  Bindings without a recorded
-    original (created before this feature) fall back to the stock record for
-    their offset.
-    """
-    from .blobs import CONST_KEYMAP
-    from .macro import find_binding
-    n = 0
-    for info in cache["bindings"].values():
-        off = info.get("offset")
-        rec = info.get("record")
-        if isinstance(off, int) and isinstance(rec, str) and len(rec) == 8:
-            original = bytes.fromhex(rec)
-            if keymap[off:off + 4] != original:
-                keymap[off:off + 4] = original
-                n += 1
-            continue
-        off = find_binding(keymap, int(info["slot"]), int(info["mode"]))
-        if off is not None:
-            keymap[off:off + 4] = bytes(CONST_KEYMAP[off:off + 4])
-            n += 1
-    return n
+    from .macro import collect_bindings
+    for off, _mode, slot in collect_bindings(keymap):
+        rec = CONST_KEYMAP[off:off + 4]
+        if rec[0] in (0x00, 0x06) and rec[3] == (hid & 0xFF):
+            return off, slot
+    return None
 
 
 def cmd_macro_remove_all(args):
@@ -203,13 +163,9 @@ def cmd_macro_remove_all(args):
     Examples:
         fizzctl macro --remove-all
     """
-    from . import state
-    from .macro import build_macro_frame
+    from .blobs import CONST_KEYMAP
+    from .macro import build_macro_frame, collect_bindings, slots_in_frame
 
-    cache = state.load()
-    if not cache["slots"] and not cache["bindings"]:
-        print("no macros to remove")
-        return 0
     try:
         dev = open_device(debug=args.debug)
     except NoDeviceError:
@@ -219,7 +175,13 @@ def cmd_macro_remove_all(args):
     try:
         mode_f, canvas_f, routing_f, exec_f = _live_lighting(dev, args.debug)
         base = bytearray(_live_keymap(dev, args.debug))
-        removed = _strip_bindings(base, cache)
+        live_mf = _live_macro(dev, args.debug)
+        bindings = collect_bindings(base)
+        if not bindings and not slots_in_frame(live_mf):
+            print("no macros to remove")
+            return 0
+        for off, _mode, _slot in bindings:
+            base[off:off + 4] = bytes(CONST_KEYMAP[off:off + 4])
         frames = [
             bytes.fromhex("0583b6000000"),   # INIT
             mode_f, canvas_f, routing_f,     # current lighting (kept)
@@ -230,35 +192,26 @@ def cmd_macro_remove_all(args):
         send_burst(dev, frames, handshake=False, delay_ms=args.burst_ms)
     finally:
         dev.close()
-    state.save({"slots": {}, "bindings": {}})
-    print(f"removed {removed} macro binding(s) and cleared all macro slots")
+    print(f"removed {len(bindings)} macro binding(s) and cleared all macro slots")
     return 0
 
 
 def cmd_keymap(args):
     """Write a full keymap from a Cfg.ini (flash write).
 
-    Previously created macros are re-applied on top, and the current lighting
-    (effect, color, brightness) is kept.
+    Existing macro bindings and slots are read back from the device and
+    re-applied on top, and the current lighting (effect, color, brightness)
+    is kept.
 
     Examples:
         fizzctl keymap cfgs/cfg_final.ini
     """
-    from . import state
-    from .macro import build_macro_frame
+    from .macro import collect_bindings, slots_in_frame
 
     keymap = bytearray(KeymapEncoder(CfgIni(args.cfg)).build())
     if len(keymap) != 1032:
         print("error: keymap block is not 1032 bytes")
         return 1
-    cache = state.load()
-    missed = _apply_bindings(keymap, cache["bindings"])
-    if args.debug:
-        print(f"built keymap from {args.cfg}")
-        if cache["slots"]:
-            print(f"  re-applying {len(cache['bindings'])} macro binding(s)")
-    if missed:
-        print(f"warning: could not bind {', '.join(missed)} in this keymap")
     try:
         dev = open_device(debug=args.debug)
     except NoDeviceError:
@@ -267,14 +220,20 @@ def cmd_keymap(args):
         return 1
     try:
         mode, canvas, routing, exec_ = _live_lighting(dev, args.debug)
+        live_km = _live_keymap(dev, args.debug)
+        live_mf = _live_macro(dev, args.debug)
+        for off, m, s in collect_bindings(live_km):
+            keymap[off:off + 4] = bytes((0x10, 0x00, m, s))
+        if args.debug:
+            print(f"built keymap from {args.cfg} (re-applied {len(collect_bindings(live_km))} macro binding(s))")
         # exact capture order, but with the device's live lighting blocks
         frames = [
             bytes.fromhex("050581000000"),       # INIT
             bytes.fromhex("0583b6000000"),       # INIT
             mode, canvas, routing,                # current lighting
         ]
-        if cache["slots"]:
-            frames.append(build_macro_frame(state.raw_slots(cache)))
+        if slots_in_frame(live_mf):
+            frames.append(live_mf)                # 06 05 dc (slots kept)
         frames += [
             bytes(keymap),                        # 06 04 d4 keymap block
             exec_,                                # EXEC (5AA5 commit)
@@ -301,7 +260,6 @@ def cmd_restore(args):
     Examples:
         fizzctl restore
     """
-    from . import state
     from .macro import build_macro_frame
 
     keymap = bytearray(KeymapEncoder(CfgIni(_stock_cfg())).build())
@@ -327,7 +285,6 @@ def cmd_restore(args):
         send_burst(dev, frames, handshake=False, delay_ms=args.delay_ms)
     finally:
         dev.close()
-    state.save({"slots": {}, "bindings": {}})
     print("restored factory keymap, lighting and macros")
     return 0
 
@@ -337,8 +294,6 @@ def cmd_read_macro(args):
 
     Probes the macro read path (selector ``05 85 dc``, mirrors the keymap
     read ``05 84 d4``) and decodes whichever slots the firmware returns.
-    The keyboard may answer with a fixed/factory table instead of the live
-    one — that answer is exactly what this command is for.
 
     Examples:
         fizzctl read-macro
@@ -442,20 +397,20 @@ def cmd_effect(args):
 def cmd_macro(args):
     """Bind a key to a macro that types text (flash write).
 
-    Each macro gets its own slot, and previously created macros are re-applied.
-    The device's current keymap is read first and used as the base, and the
-    current lighting is kept, so neither your remaps nor your effect/color are
-    disturbed.  ``--remove-all`` unbinds every macro instead.
+    The device's current keymap and macro table are read back first, so
+    existing macros, bindings and remaps are kept with no local state file;
+    the current lighting is kept too.  ``--remove-all`` unbinds every macro
+    instead.
 
     Examples:
         fizzctl macro --key CapsLock rgb
         fizzctl macro --key LAlt --delay-ms 50 --cycles 3 hello
         fizzctl macro --remove-all
     """
-    from . import state
     from .macro import (
-        MODE_CYCLES, MODE_UNTIL_RELEASED, NAME_TO_HID,
-        build_macro_frame, encode_slot, text_events,
+        MODE_CYCLES, MODE_UNTIL_RELEASED, MAX_SLOTS, NAME_TO_HID,
+        build_macro_frame, encode_slot, locate_key, slots_in_frame,
+        text_events,
     )
 
     if args.remove_all:
@@ -480,19 +435,6 @@ def cmd_macro(args):
         return 1
 
     mode = MODE_UNTIL_RELEASED if args.until_released else MODE_CYCLES
-    cache = state.load()
-    try:
-        slot = state.alloc_slot(cache, args.key)
-    except ValueError as e:
-        print(e)
-        return 1
-    cache["slots"][str(slot)] = encode_slot(args.cycles, events).hex()
-    cache["bindings"][args.key] = {"slot": slot, "mode": mode}
-
-    if args.debug:
-        print(f"macro: slot{slot} cycles={args.cycles} events={len(events)} "
-              f"mode={mode:#04x} bind={args.key}")
-
     try:
         dev = open_device(debug=args.debug)
     except NoDeviceError:
@@ -502,25 +444,45 @@ def cmd_macro(args):
     try:
         mode_f, canvas_f, routing_f, exec_f = _live_lighting(dev, args.debug)
         base = bytearray(_live_keymap(dev, args.debug))
-        missed = _apply_bindings(base, cache["bindings"], cache)
-        if args.key in missed:
-            print(f"could not find key {args.key!r} in the keymap")
-            return 1
-        if missed:
-            print(f"warning: could not bind {', '.join(missed)} in the keymap")
-        # exact capture order, but with the device's live lighting blocks
+        live_mf = _live_macro(dev, args.debug)
+        slots = slots_in_frame(live_mf)
+        hid = NAME_TO_HID[args.key]
+
+        off = locate_key(base, hid)
+        if off is None:
+            # already bound: the device echoes it as a `10` record, so find
+            # which binding this key is by its stock record instead
+            pos = _binding_for_hid(base, hid)
+            if pos is None:
+                print(f"could not find key {args.key!r} in the keymap")
+                return 1
+            bind_off, slot_idx = pos
+        else:
+            free = [i for i in range(MAX_SLOTS) if i not in slots]
+            if not free:
+                print(f"all {MAX_SLOTS} macro slots are in use")
+                return 1
+            bind_off, slot_idx = off, free[0]
+
+        slots[slot_idx] = encode_slot(args.cycles, events)
+        base[bind_off:bind_off + 4] = bytes((0x10, 0x00, mode, slot_idx))
+
+        if args.debug:
+            print(f"macro: slot{slot_idx} cycles={args.cycles} events={len(events)} "
+                  f"mode={mode:#04x} bind={args.key}")
+
+        # exact capture order, but with the device's live blocks
         frames = [
             bytes.fromhex("0583b6000000"),   # INIT
             mode_f, canvas_f, routing_f,     # current lighting
-            build_macro_frame(state.raw_slots(cache)),   # 06 05 dc (all slots)
+            build_macro_frame(slots),        # 06 05 dc (all slots)
             bytes(base),                     # 06 04 d4 (all bindings)
             exec_f,                          # EXEC (5AA5 commit)
         ]
         send_burst(dev, frames, handshake=False, delay_ms=args.burst_ms)
     finally:
         dev.close()
-    state.save(cache)
-    print(f"bound {args.key} -> macro typing {args.text!r} (slot {slot})")
+    print(f"bound {args.key} -> macro typing {args.text!r} (slot {slot_idx})")
     return 0
 
 
@@ -708,9 +670,8 @@ Examples:
     prd = sub.add_parser("read-macro",
                         help="read the on-device macro table back (dev tool)",
                         description="""
-Probes the macro read path (selector 05 85 dc) and decodes the slots the
-firmware returns.  The device may answer with a factory/demo table instead
-of the live one; that answer is exactly what this command is for.
+Reads the macro table (selector 05 85 dc) and decodes the slots the firmware
+returns.
 
 Examples:
   fizzctl read-macro

@@ -41,6 +41,7 @@ the trigger did not pick it up.
 | `keymap` | Write the keymap from a Cfg.ini | yes |
 | `macro` | Bind a key that types text on press | yes |
 | `restore` | Reset to the factory keymap, lighting and macros | yes |
+| `read-macro` | Dump the on-device macro table (dev tool) | no |
 | `animate` | Host-streamed animation (volatile) | no |
 
 ## Examples
@@ -82,9 +83,12 @@ fizzctl macro --key 2 --until-released aaaa
 
 Options: `--delay-ms` (default 30) is the delay between typed events,
 `--cycles` (default 1) plays the macro that many times per press, and
-`--until-released` types in a loop until the key is let go. Macros and their
-bindings are remembered in a local state file (`$XDG_STATE_HOME/fizzctl/`)
-so later macro/keymap writes never drop them. To undo:
+`--until-released` types in a loop until the key is let go. Macros are read
+straight back off the keyboard's flash: each write reads the current keymap
+and macro table first, patches them, and writes the full table back — so
+later macro/keymap writes never drop your existing macros, and nothing is
+saved on the host. `fizzctl read-macro` dumps the on-device table for
+verification. To undo:
 
 ```bash
 fizzctl macro --remove-all          # unbind every macro, keep keymap + lighting

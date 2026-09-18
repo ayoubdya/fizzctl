@@ -1,26 +1,50 @@
 import hashlib
-import os
-import tempfile
 import unittest
 from unittest.mock import Mock, call, patch
 
 from fizzctl import blobs, cli
 from fizzctl.effects import encode_firmware_effect
 from fizzctl.hid import send_burst
+from fizzctl.macro import build_macro_frame
 from fizzctl.protocol import base_frames
 
 
+class FakeK617:
+    """In-memory K617: the keymap and macro table mutate through the write
+    path, so the device's read-back reflects what was sent.  Reads happen in a
+    fixed order per command (4 lighting, 1 keymap, 1 macro)."""
+
+    def __init__(self):
+        self.keymap = bytearray(blobs.CONST_KEYMAP)
+        self.macro = bytearray(build_macro_frame({}))
+        self.writes = []
+        self._reads = 0
+        self.debug = False
+        self.closed = False
+
+    def get_feature(self, rid, size):
+        self._reads += 1
+        n = self._reads
+        if n % 6 == 5:
+            return bytes(self.keymap)
+        if n % 6 == 0:
+            return bytes(self.macro)
+        return bytes(1032)
+
+    def send_feature(self, data):
+        data = bytes(data)
+        self.writes.append(data)
+        if data[:1] == b"\x06":
+            if data[1:2] == b"\x05":       # 06 05 dc macro table
+                self.macro = bytearray(data)
+            elif data[1:2] == b"\x04":     # 06 04 d4 keymap block
+                self.keymap = bytearray(data)
+
+    def close(self):
+        self.closed = True
+
+
 class RegressionTests(unittest.TestCase):
-    def setUp(self):
-        # keep the macro cache out of the developer's real state file
-        self._tmp = tempfile.TemporaryDirectory()
-        self._env = patch.dict(os.environ, {"XDG_STATE_HOME": self._tmp.name})
-        self._env.start()
-
-    def tearDown(self):
-        self._env.stop()
-        self._tmp.cleanup()
-
     def test_packet_bytes(self):
         names = ("CONST_MODE", "CONST_CANVAS", "CONST_ROUTING", "CONST_EXEC", "RGB_SEC", "RGB_EXEC")
         data = b"".join(getattr(blobs, name) for name in names) + b"".join(blobs.FW_TEMPLATE)
@@ -165,22 +189,15 @@ class RegressionTests(unittest.TestCase):
     @patch("time.sleep")
     @patch("fizzctl.cli.open_device")
     def test_cli_macro(self, open_device, sleep):
-        dev = Mock(debug=False)
-        dev.get_feature.return_value = bytes(blobs.CONST_KEYMAP)
+        dev = FakeK617()
         open_device.return_value = dev
         parser = cli._build_parser(False)
 
-        # 4 lighting read-selector sends + 1 keymap read-selector send
-        def burst():
-            return [c.args[0] for c in dev.send_feature.call_args_list][5:]
-
+        start = len(dev.writes)
         rc = cli.cmd_macro(parser.parse_args(["macro", "--key", "CapsLk", "rgb"]))
         self.assertEqual(rc, 0)
-        dev.close.assert_called_once()
-        # 4 lighting reads + 1 keymap read; no handshake GET after INIT
-        self.assertEqual(dev.get_feature.call_count, 5)
-        dev.get_feature.assert_called_with(6, 1032)
-        frames = burst()
+        self.assertTrue(dev.closed)
+        frames = dev.writes[start + 6:]     # skip this command's 6 read selectors
         self.assertEqual([f[:3] for f in frames], [
             bytes.fromhex("0583b6"), bytes.fromhex("0608b8"),
             bytes.fromhex("0609bc"), bytes.fromhex("0609c0"),
@@ -192,11 +209,11 @@ class RegressionTests(unittest.TestCase):
         # LAlt (a different key) is left untouched in the live-base keymap
         self.assertEqual(bytes(frames[5][660:664]), bytes((0x06, 0x00, 0x00, 0xE2)))
 
-        dev.reset_mock()
+        start = len(dev.writes)
         rc = cli.cmd_macro(parser.parse_args(
             ["macro", "--key", "LAlt", "--until-released", "--cycles", "3", "hi"]))
         self.assertEqual(rc, 0)
-        frames = burst()
+        frames = dev.writes[start + 6:]
         slot1 = 9 + 128
         self.assertEqual(frames[4][slot1], 3)                    # slot1 cycle count
         self.assertEqual(frames[4][9:22], bytes.fromhex("011e159e151e0a9e0a1e059e05"))
@@ -214,53 +231,46 @@ class RegressionTests(unittest.TestCase):
     @patch("time.sleep")
     @patch("fizzctl.cli.open_device")
     def test_cli_macro_remove_all(self, open_device, sleep):
-        from fizzctl import state
-
-        dev = Mock(debug=False)
-        dev.get_feature.return_value = bytes(blobs.CONST_KEYMAP)
+        dev = FakeK617()
         open_device.return_value = dev
         parser = cli._build_parser(False)
         self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--key", "LAlt", "hi"])), 0)
 
-        # a read-back that echoes the binding back (the key is already bound)
-        mounted = bytearray(blobs.CONST_KEYMAP)
-        mounted[660:664] = bytes((0x10, 0x00, 0x01, 0x00))
-        dev.reset_mock()
-        dev.get_feature.side_effect = [
-            bytes(blobs.CONST_MODE), bytes(blobs.CONST_CANVAS),
-            bytes(blobs.CONST_ROUTING), bytes(blobs.CONST_EXEC),
-            bytes(mounted),
-        ]
-        rc = cli.cmd_macro_remove_all(parser.parse_args(["macro", "--remove-all"]))
+        start = len(dev.writes)
+        rc = cli.cmd_macro(parser.parse_args(["macro", "--remove-all"]))
         self.assertEqual(rc, 0)
-        frames = [c.args[0] for c in dev.send_feature.call_args_list][5:]
+        frames = dev.writes[start + 6:]
         self.assertEqual([f[:3] for f in frames], [
             bytes.fromhex("0583b6"), bytes.fromhex("0608b8"),
             bytes.fromhex("0609bc"), bytes.fromhex("0609c0"),
             bytes.fromhex("0605dc"), bytes.fromhex("0604d4"),
             bytes.fromhex("0603b6"),
         ])
-        self.assertEqual(frames[4][9:], bytes(1032 - 9))                      # slots wiped
-        self.assertEqual(frames[5][660:664], bytes((0x06, 0x00, 0x00, 0xE2)))  # restored
-        self.assertEqual(state.load(), {"slots": {}, "bindings": {}})          # cache cleared
+        self.assertEqual(frames[4][9:], bytes(1032 - 9))                        # slots wiped
+        self.assertEqual(frames[5][660:664], bytes((0x06, 0x00, 0x00, 0xE2)))    # original back
+        self.assertEqual(bytes(frames[5][616:620]), bytes(blobs.CONST_KEYMAP[616:620]))
 
+    @patch("time.sleep")
     @patch("fizzctl.cli.open_device")
-    def test_cli_macro_remove_all_empty(self, open_device):
+    def test_cli_macro_remove_all_empty(self, open_device, sleep):
+        dev = FakeK617()
+        open_device.return_value = dev
         parser = cli._build_parser(False)
-        self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--remove-all"])), 0)
-        open_device.assert_not_called()
 
-    def test_strip_bindings_fallback(self):
-        from fizzctl.cli import _strip_bindings
-        from fizzctl.macro import bind_macro
+        rc = cli.cmd_macro(parser.parse_args(["macro", "--remove-all"]))
+        self.assertEqual(rc, 0)
+        self.assertTrue(dev.closed)
+        # only read selectors are sent, never any write frames
+        self.assertFalse(any(w[:1] == b"\x06" for w in dev.writes))
 
-        base = bytearray(blobs.CONST_KEYMAP)
-        bind_macro(base, 0xE2, 0, 1)              # legacy binding: no original cached
-        self.assertEqual(base[660:664], bytes((0x10, 0x00, 0x01, 0x00)))
-        cache = {"slots": {"0": "00" * 128},
-                 "bindings": {"LAlt": {"slot": 0, "mode": 1}}}
-        self.assertEqual(_strip_bindings(base, cache), 1)
-        self.assertEqual(base[660:664], bytes((0x06, 0x00, 0x00, 0xE2)))
+    def test_collect_bindings(self):
+        from fizzctl.macro import collect_bindings
+
+        km = bytearray(blobs.CONST_KEYMAP)
+        self.assertEqual(collect_bindings(km), [])
+        km[616:620] = bytes((0x10, 0x00, 0x04, 0x02))
+        km[588:592] = bytes((0x10, 0x00, 0x01, 0x00))
+        self.assertEqual(collect_bindings(km), [(588, 0x01, 0x00), (616, 0x04, 0x02)])
 
     def test_decode_macro_frame_from_capture(self):
         from fizzctl.capture import load_tshark_json, significant
@@ -294,51 +304,26 @@ class RegressionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_macro_frame({8: slot})
 
-    def test_state_alloc_slot(self):
-        from fizzctl import state
-
-        st = {"slots": {}, "bindings": {}}
-        self.assertEqual(state.alloc_slot(st, "CapsLk"), 0)
-        st["slots"]["0"] = "00" * 128
-        st["bindings"]["CapsLk"] = {"slot": 0, "mode": 1}
-        self.assertEqual(state.alloc_slot(st, "CapsLk"), 0)   # reuse existing
-        self.assertEqual(state.alloc_slot(st, "LAlt"), 1)     # next free
-
-    def test_find_binding_and_apply(self):
-        from fizzctl.cli import _apply_bindings
-        from fizzctl.macro import bind_macro, find_binding
-
-        base = bytearray(blobs.CONST_KEYMAP)
-        self.assertIsNone(find_binding(base, 0, 1))                 # none yet
-        bind_macro(base, 0xE2, 0, 1)                                # LAlt -> slot0
-        self.assertEqual(base[660:664], bytes((0x10, 0x00, 0x01, 0x00)))
-        self.assertEqual(find_binding(base, 0, 1), 660)             # echoed back
-
-        # a read-back that already contains the binding is not "missed"
-        self.assertEqual(_apply_bindings(base, {"LAlt": {"slot": 0, "mode": 1}}), [])
-        self.assertEqual(_apply_bindings(base, {"Nope": {"slot": 1, "mode": 1}}), ["Nope"])
-
     @patch("time.sleep")
     @patch("fizzctl.cli.open_device")
     def test_cli_keymap_reapplies_macros(self, open_device, sleep):
-        dev = Mock(debug=False)
-        dev.get_feature.return_value = bytes(blobs.CONST_KEYMAP)
+        dev = FakeK617()
         open_device.return_value = dev
         parser = cli._build_parser(False)
 
         self.assertEqual(cli.cmd_macro(parser.parse_args(["macro", "--key", "CapsLk", "rgb"])), 0)
-        dev.reset_mock()
+        start = len(dev.writes)
         self.assertEqual(cli.cmd_keymap(parser.parse_args(["keymap", "cfgs/cfg_final.ini"])), 0)
-        frames = [c.args[0] for c in dev.send_feature.call_args_list][4:]
-        # light.., MACRO, KEYMAP, EXEC — the cached macro frame is re-sent
+        frames = dev.writes[start + 6:]
+        # light.., MACRO, KEYMAP, EXEC — the live macro frame is re-sent
         self.assertEqual(len(frames), 8)
         self.assertEqual(frames[-3][:3], bytes.fromhex("0605dc"))
+        self.assertEqual(frames[-3][9:22], bytes.fromhex("011e159e151e0a9e0a1e059e05"))
         self.assertEqual(bytes(frames[-2][616:620]), bytes((0x10, 0x00, 0x01, 0x00)))
 
     @patch("time.sleep")
     @patch("fizzctl.cli.open_device")
     def test_cli_restore(self, open_device, sleep):
-        from fizzctl import state
         from fizzctl.cli import _stock_cfg
         from fizzctl.cfg import CfgIni
         from fizzctl.keymap import KeymapEncoder
@@ -363,7 +348,6 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(frames[2], bytes(blobs.CONST_MODE))       # factory lighting
         self.assertEqual(frames[5][9:], bytes(1032 - 9))           # macros wiped
         self.assertEqual(frames[6], bytes(KeymapEncoder(CfgIni(_stock_cfg())).build()))
-        self.assertEqual(state.load(), {"slots": {}, "bindings": {}})  # cache cleared
 
     @patch("time.sleep")
     def test_read_lighting_restores_headers(self, sleep):
@@ -395,7 +379,7 @@ class RegressionTests(unittest.TestCase):
         rc = cli.cmd_keymap(parser.parse_args(["keymap", "cfgs/cfg_final.ini"]))
         self.assertEqual(rc, 0)
         dev.close.assert_called_once()
-        frames = [c.args[0] for c in dev.send_feature.call_args_list][4:]
+        frames = [c.args[0] for c in dev.send_feature.call_args_list][6:]
         self.assertEqual([f[:3] for f in frames], [
             bytes.fromhex("050581"), bytes.fromhex("0583b6"),
             bytes.fromhex("0608b8"), bytes.fromhex("0609bc"),
@@ -415,7 +399,7 @@ class RegressionTests(unittest.TestCase):
 
         rc = cli.cmd_keymap(parser.parse_args(["keymap", "cfgs/cfg_final.ini"]))
         self.assertEqual(rc, 0)
-        frames = [c.args[0] for c in dev.send_feature.call_args_list][1:]
+        frames = [c.args[0] for c in dev.send_feature.call_args_list][-7:]
         self.assertEqual(frames[2], blobs.CONST_MODE)   # stock fallback
 
 

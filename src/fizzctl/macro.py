@@ -166,24 +166,34 @@ def bind_macro(keymap: bytearray, hid: int, slot: int,
     return off
 
 
-def find_binding(keymap, slot: int, mode: int = MODE_CYCLES) -> int | None:
-    """Offset of a ``10 00 <mode> <slot>`` binding already in ``keymap``.
+def collect_bindings(keymap) -> list[tuple[int, int, int]]:
+    """Every macro binding in ``keymap`` as ``(offset, mode, slot)``.
 
-    The device echoes macro bindings back as ``10`` records instead of the
-    key's base output, so a read-back keymap can contain the binding even
-    though :func:`bind_macro` cannot rediscover it.  Used to treat an existing
-    binding as "already applied" rather than a failed re-apply.
+    The device echoes live macro bindings back as ``10 00 <mode> <slot>``
+    records, so a read-back keymap contains them.  Region B (FN keys) is
+    scanned before the column records, matching :func:`locate_key`'s order.
     """
-    rec = bytes((ACTION_MACRO, 0x00, mode & 0xFF, slot & 0xFF))
+    out: list[tuple[int, int, int]] = []
     for start, count in (
         (REGION_B_BASE, (REGION_B_END - REGION_B_BASE) // 4),
         (REGION_A_BASE, (REGION_B_BASE - REGION_A_BASE) // 4),
     ):
         for pos in range(count):
             off = start + pos * 4
-            if keymap[off:off + 4] == rec:
-                return off
-    return None
+            if keymap[off] == ACTION_MACRO:
+                out.append((off, keymap[off + 2], keymap[off + 3]))
+    return out
+
+
+def slots_in_frame(frame: bytes) -> dict[int, bytes]:
+    """The non-empty slots of a macro frame as ``{index: 128-byte slot}``."""
+    slots: dict[int, bytes] = {}
+    for i in range(MAX_SLOTS):
+        base = SLOT_BASE + i * SLOT_STRIDE
+        slot = frame[base:base + SLOT_STRIDE]
+        if any(slot):
+            slots[i] = slot
+    return slots
 
 
 # --------------------------------------------------------------------------

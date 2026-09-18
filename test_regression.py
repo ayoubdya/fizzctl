@@ -326,6 +326,26 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(out2[76:80], bytes((0x10, 0x00, 0x01, 0x02)))
         self.assertEqual(out2[660:664], stock[660:664])
 
+    def test_media_codes_wire_bytes(self):
+        from fizzctl.cfg import CfgIni
+        from fizzctl.keymap import KeymapEncoder, MEDIA_CODES
+
+        cfg = CfgIni("cfgs/cfg_final.ini")
+        enc = KeymapEncoder(cfg)
+        seen = set()
+        for idx in cfg.fn:
+            t, code, extra = cfg.fn[idx]
+            if t != 4:
+                continue
+            seen.add(code)
+            self.assertEqual(enc._fn_output(idx),
+                             bytes([4, 0, 0, MEDIA_CODES[code].wire]))
+        # the codes our shipped cfgs use, all wired to a consumer usage
+        self.assertEqual(sorted(seen), [0x22, 0x26, 0x27, 0x28])
+        # the rest of the Redragon media enum, by USB HID Consumer usage
+        self.assertEqual([MEDIA_CODES[c].wire for c in (0x23, 0x24, 0x25)],
+                         [0xb7, 0xb6, 0xb5])  # stop, previous, next
+
     def test_decode_macro_frame_from_capture(self):
         from fizzctl.capture import load_tshark_json, significant
         from fizzctl.macro import decode_macro_frame

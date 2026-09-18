@@ -43,6 +43,9 @@ is still unproven.  The dev toolkit is `fizzctl-dev`
 - Speed is stored 0-based (display += 1); sine-wave `--speed 1` → shows 2.
 - Per-key: Esc=1, Menu=77, RCtrl=83.
 - Media codes: play/pause cfg `0x22` → wire `0xcd` (OEM capture cfg_r4).
+  Full enum (`0x22` play/pause, `0x23` stop, `0x24` prev, `0x25` next,
+  `0x26` vol+, `0x27` vol-, `0x28` mute) cross-checked against the shared
+  `redragonKB-remap` enum; `0x26/0x27/0x28` match our captures.
 - until-released mode (`10 00 04 <slot>`) vs cycles (`10 00 01 <slot>`) echo
   back from the device and persist across writes.
 - Single-open HID: second concurrent open fails ("open failed", misread as

@@ -28,9 +28,17 @@ Media consumer codes (mapped to USB HID Consumer usages in `MEDIA_CODES`):
 | cfg code | wire byte | name |
 |---|---|---|
 | `0x22` | `0xcd` | play/pause (captured in cfg_r4) |
+| `0x23` | `0xb7` | stop |
+| `0x24` | `0xb6` | previous |
+| `0x25` | `0xb5` | next |
 | `0x26` | `0xe9` | vol+ |
 | `0x27` | `0xea` | vol- |
 | `0x28` | `0xe2` | mute |
+
+The cfg enum is the Redragon software's fixed list; `0x26/0x27/0x28` were
+capture-confirmed and the full list cross-checks against the shared
+`redragonKB-remap` enum (our cfgs only ever use `0x22/0x26/0x27/0x28`).
+The wire byte is the USB HID Consumer Page usage code.
 
 ### `[KEY] — base-layer keys`
 

@@ -93,9 +93,15 @@ class MediaCode:
 
 # type-4 FN media codes.  The on-wire byte is the USB HID Consumer Page
 # usage code (Play/Pause confirmed by capture cfg_r4: cfg 0x22 -> 0xcd,
-# which is consumer usage 0x00cd).  The rest follow the same table.
+# which is consumer usage 0x00cd).  The cfg-side enum is the Redragon
+# software's fixed list (cross-checked with the shared redragonKB-remap
+# enum, which matches our captured 0x26/0x27/0x28): 0x22 play/pause,
+# 0x23 stop, 0x24 prev, 0x25 next, 0x26 vol+, 0x27 vol-, 0x28 mute.
 MEDIA_CODES = {
     0x22: MediaCode(0x22, 0xcd, "play/pause"),   # captured in cfg_r4
+    0x23: MediaCode(0x23, 0xb7, "stop"),
+    0x24: MediaCode(0x24, 0xb6, "previous"),
+    0x25: MediaCode(0x25, 0xb5, "next"),
     0x26: MediaCode(0x26, 0xe9, "vol+"),
     0x27: MediaCode(0x27, 0xea, "vol-"),
     0x28: MediaCode(0x28, 0xe2, "mute"),

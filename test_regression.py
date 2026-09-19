@@ -346,6 +346,37 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual([MEDIA_CODES[c].wire for c in (0x23, 0x24, 0x25)],
                          [0xb7, 0xb6, 0xb5])  # stop, previous, next
 
+    def test_animate_stop_idle(self):
+        import os
+        import tempfile
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            with patch.dict(os.environ, {"XDG_RUNTIME_DIR": d}):
+                parser = cli._build_parser(False)
+                self.assertEqual(cli.cmd_animate(parser.parse_args(["animate", "stop"])), 0)
+
+    def test_animate_stop_stale_pidfile(self):
+        import os
+        import tempfile
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            with patch.dict(os.environ, {"XDG_RUNTIME_DIR": d}):
+                pidfile = os.path.join(d, "fizzctl-animate.pid")
+                with open(pidfile, "w") as f:
+                    f.write("4294967295")  # a pid that cannot exist
+                parser = cli._build_parser(False)
+                self.assertEqual(cli.cmd_animate(parser.parse_args(["animate", "stop"])), 0)
+                self.assertFalse(os.path.exists(pidfile))
+
+    def test_animate_daemon_flag(self):
+        parser = cli._build_parser(False)
+        args = parser.parse_args(["animate", "--daemon", "rainbow"])
+        self.assertTrue(args.daemon)
+        self.assertEqual(args.name, "rainbow")
+        self.assertEqual(parser.parse_args(["animate", "stop"]).name, "stop")
+
     def test_decode_macro_frame_from_capture(self):
         from fizzctl.capture import load_tshark_json, significant
         from fizzctl.macro import decode_macro_frame

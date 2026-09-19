@@ -142,6 +142,8 @@ fizzctl animate
 fizzctl animate rainbow --fps 30 --duration 10  # or: -f 30
 fizzctl animate chase --color ff0000 --speed 2  # or: -c yellow -s 2
 fizzctl animate solid --color 0000ff
+fizzctl animate chase --daemon     # free the terminal; daemon streams until stopped
+fizzctl animate stop               # stop the daemon
 ```
 
 ### Debug mode

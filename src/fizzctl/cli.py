@@ -639,6 +639,8 @@ Examples:
   fizzctl animate rainbow --fps 30 --duration 10
   fizzctl animate chase --color yellow --speed 2
   fizzctl animate solid --color ff0000
+  fizzctl animate chase --daemon    # background daemon; `animate stop` ends it
+  fizzctl animate stop
   fizzctl animate                                 # lists all animations
 """.rstrip(),
                         formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -648,6 +650,8 @@ Examples:
     pa.add_argument("-s", "--speed", type=float, default=1.0, help="animation speed multiplier")
     pa.add_argument("-f", "--fps", type=int, default=30, help="frames per second")
     pa.add_argument("--duration", type=float, help="stop after N seconds (default: until Ctrl+C)")
+    pa.add_argument("--daemon", action="store_true",
+                    help="run in a background daemon and free the terminal")
 
     prs = sub.add_parser("keymap",
                         help="write the keymap from a Cfg.ini: keymap Cfg.ini (flash write)",

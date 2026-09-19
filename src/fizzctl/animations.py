@@ -4,12 +4,18 @@ These are NOT firmware effects — they render color maps on the host and push
 one 382-byte per-key report per frame (volatile; stop with Ctrl+C).  Only the
 8 firmware-native effects (`fizzctl effect`) survive a disconnect.
 
+`fizzctl animate <name> --daemon` runs the stream in a detached background
+daemon (PID in <XDG_RUNTIME_DIR|/tmp>/fizzctl-animate.pid) so the terminal is
+free; `fizzctl animate stop` ends it.
+
 Animation helpers are pure ("render_frame(t, color, speed) -> dict") so they
 can be unit-tested without hardware.
 """
 from __future__ import annotations
 
 import math
+import os
+import signal
 import time
 
 from .effects import PER_KEY_POS, encode_per_key_frame, parse_color
@@ -114,13 +120,14 @@ def run_animation(dev, anim: str, color: tuple[int, int, int],
 
 
 def cmd_animate(args):
-    """fizzctl animate <name> [--color HEX] [--speed N] [--fps N] [--duration S]"""
-    from .hid import NoDeviceError, open_device
-
+    """fizzctl animate <name> [--color HEX] [--speed N] [--fps N] [--duration S] [--daemon]"""
+    if args.name == "stop":
+        return _animate_stop()
     anim = args.name
     if anim is None:
         print("Host-side animations (volatile — lost on disconnect). Run like:")
         print("  fizzctl animate chase --color yellow --speed 2 --fps 30")
+        print("  fizzctl animate chase --daemon   # background daemon, `animate stop` ends it")
         for name in ANIMATIONS:
             print(f"  {name}")
         return 0
@@ -131,6 +138,9 @@ def cmd_animate(args):
     if color is None:
         print(f"bad color {args.color!r}")
         return 1
+    if getattr(args, "daemon", False):
+        return _animate_daemon(args, anim, color)
+    from .hid import NoDeviceError, open_device
     try:
         dev = open_device(debug=getattr(args, 'debug', False))
     except NoDeviceError:
@@ -143,3 +153,120 @@ def cmd_animate(args):
     finally:
         dev.close()
     return 0
+
+
+def _pidfile() -> str:
+    d = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+    return os.path.join(d, "fizzctl-animate.pid")
+
+
+def _alive(pid: int) -> bool:
+    """True only if pid is a plausible live pid (bounds guard the SIGTERM path)."""
+    if not 1 <= pid <= 4194304:                 # linux pid_max default
+        return False
+    try:
+        os.kill(pid, 0)
+    except (ProcessLookupError, OverflowError):
+        return False
+    return True
+
+
+def _animate_daemon(args, anim, color):
+    """Stream `anim` in a detached background daemon; returns 0 when started."""
+    from .hid import NoDeviceError, open_device
+
+    pidfile = _pidfile()
+    try:
+        with open(pidfile) as f:
+            old = int(f.read().strip())
+    except (OSError, ValueError):
+        old = None
+    if old is not None and _alive(old):
+        print(f"animate already running (pid {old}); `fizzctl animate stop` first")
+        return 1
+
+    child = os.fork()
+    if child:                                   # parent: wait for the pidfile
+        for _ in range(60):
+            try:
+                with open(pidfile) as f:
+                    started = int(f.read().strip())
+            except (OSError, ValueError):
+                started = None
+            if started == child:
+                print(f"streaming {anim} in background (pid {child}); fizzctl animate stop to end")
+                return 0
+            done, _ = os.waitpid(child, os.WNOHANG)
+            if done:
+                print("animate failed to start (device error)")
+                return 1
+            time.sleep(0.05)
+        os.kill(child, signal.SIGKILL)
+        os.waitpid(child, 0)
+        print("animate failed to start (timeout)")
+        return 1
+
+    # child: detach, then open the device and stream
+    os.setsid()
+    dn = os.open(os.devnull, os.O_RDWR)
+    for fd in (0, 1, 2):
+        os.dup2(dn, fd)
+    os.chdir("/")                               # don't pin the caller's cwd
+    try:
+        os.closerange(3, os.sysconf("SC_OPEN_MAX"))   # shed inherited fds
+    except (ValueError, OSError, AttributeError):
+        os.closerange(3, 1024)
+    try:
+        try:
+            dev = open_device(debug=getattr(args, "debug", False))
+        except NoDeviceError:
+            os._exit(1)
+        if dev is None:
+            os._exit(1)
+        with open(pidfile, "w") as f:
+            f.write(str(os.getpid()))
+        try:
+            run_animation(dev, anim, color, fps=args.fps, speed=args.speed,
+                          duration=args.duration)
+        finally:
+            dev.close()
+            try:
+                os.unlink(pidfile)
+            except OSError:
+                pass
+    except BaseException:
+        try:
+            os.unlink(pidfile)
+        except OSError:
+            pass
+        os._exit(1)
+    os._exit(0)
+
+
+def _animate_stop():
+    pidfile = _pidfile()
+    try:
+        with open(pidfile) as f:
+            pid = int(f.read().strip())
+    except (OSError, ValueError):
+        print("animate is not running")
+        return 0
+    if not _alive(pid):
+        try:
+            os.unlink(pidfile)
+        except OSError:
+            pass
+        print("animate is not running")
+        return 0
+    os.kill(pid, signal.SIGTERM)
+    for _ in range(100):
+        if not _alive(pid):
+            try:
+                os.unlink(pidfile)
+            except OSError:
+                pass
+            print("stopped")
+            return 0
+        time.sleep(0.05)
+    print(f"animate did not stop; kill pid {pid} manually")
+    return 1

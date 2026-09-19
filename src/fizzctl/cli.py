@@ -652,6 +652,8 @@ Examples:
     pa.add_argument("--duration", type=float, help="stop after N seconds (default: until Ctrl+C)")
     pa.add_argument("--daemon", action="store_true",
                     help="run in a background daemon and free the terminal")
+    pa.add_argument("--daemon-child", action="store_true",
+                    help=argparse.SUPPRESS)
 
     prs = sub.add_parser("keymap",
                         help="write the keymap from a Cfg.ini: keymap Cfg.ini (flash write)",

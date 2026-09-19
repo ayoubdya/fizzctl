@@ -138,7 +138,7 @@ def cmd_animate(args):
     if color is None:
         print(f"bad color {args.color!r}")
         return 1
-    if getattr(args, "daemon", False):
+    if getattr(args, "daemon", False) and not getattr(args, "daemon_child", False):
         return _animate_daemon(args, anim, color)
     from .hid import NoDeviceError, open_device
     try:
@@ -152,6 +152,11 @@ def cmd_animate(args):
         run_animation(dev, anim, color, fps=args.fps, speed=args.speed, duration=args.duration)
     finally:
         dev.close()
+        if getattr(args, "daemon_child", False):
+            try:
+                os.unlink(_pidfile())
+            except OSError:
+                pass
     return 0
 
 
@@ -172,8 +177,15 @@ def _alive(pid: int) -> bool:
 
 
 def _animate_daemon(args, anim, color):
-    """Stream `anim` in a detached background daemon; returns 0 when started."""
-    from .hid import NoDeviceError, open_device
+    """Stream `anim` in a detached background daemon; returns 0 when started.
+
+    The stream runs in a *fresh* interpreter (re-exec via `python -m fizzctl`)
+    rather than a fork() so the hidapi/libusb state and inherited file
+    descriptors of the launcher never leak into the loop — a forked child can
+    open the device yet silently render nothing.
+    """
+    import subprocess
+    import sys
 
     pidfile = _pidfile()
     try:
@@ -185,62 +197,25 @@ def _animate_daemon(args, anim, color):
         print(f"animate already running (pid {old}); `fizzctl animate stop` first")
         return 1
 
-    child = os.fork()
-    if child:                                   # parent: wait for the pidfile
-        for _ in range(60):
-            try:
-                with open(pidfile) as f:
-                    started = int(f.read().strip())
-            except (OSError, ValueError):
-                started = None
-            if started == child:
-                print(f"streaming {anim} in background (pid {child}); fizzctl animate stop to end")
-                return 0
-            done, _ = os.waitpid(child, os.WNOHANG)
-            if done:
-                print("animate failed to start (device error)")
-                return 1
-            time.sleep(0.05)
-        os.kill(child, signal.SIGKILL)
-        os.waitpid(child, 0)
-        print("animate failed to start (timeout)")
+    cmd = [sys.executable, "-m", "fizzctl"]
+    if getattr(args, "debug", False):
+        cmd.append("--debug")
+    cmd += ["animate", anim, "--daemon-child", "--color", args.color,
+            "--speed", str(args.speed), "--fps", str(args.fps)]
+    if args.duration is not None:
+        cmd += ["--duration", str(args.duration)]
+    try:
+        child = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL,
+                                 start_new_session=True, close_fds=True)
+    except OSError as e:
+        print(f"animate failed to start: {e}")
         return 1
-
-    # child: detach, then open the device and stream
-    os.setsid()
-    dn = os.open(os.devnull, os.O_RDWR)
-    for fd in (0, 1, 2):
-        os.dup2(dn, fd)
-    os.chdir("/")                               # don't pin the caller's cwd
-    try:
-        os.closerange(3, os.sysconf("SC_OPEN_MAX"))   # shed inherited fds
-    except (ValueError, OSError, AttributeError):
-        os.closerange(3, 1024)
-    try:
-        try:
-            dev = open_device(debug=getattr(args, "debug", False))
-        except NoDeviceError:
-            os._exit(1)
-        if dev is None:
-            os._exit(1)
-        with open(pidfile, "w") as f:
-            f.write(str(os.getpid()))
-        try:
-            run_animation(dev, anim, color, fps=args.fps, speed=args.speed,
-                          duration=args.duration)
-        finally:
-            dev.close()
-            try:
-                os.unlink(pidfile)
-            except OSError:
-                pass
-    except BaseException:
-        try:
-            os.unlink(pidfile)
-        except OSError:
-            pass
-        os._exit(1)
-    os._exit(0)
+    with open(pidfile, "w") as f:
+        f.write(str(child.pid))
+    print(f"streaming {anim} in background (pid {child.pid}); fizzctl animate stop to end")
+    return 0
 
 
 def _animate_stop():

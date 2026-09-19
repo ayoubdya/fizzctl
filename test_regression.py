@@ -376,6 +376,9 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(args.daemon)
         self.assertEqual(args.name, "rainbow")
         self.assertEqual(parser.parse_args(["animate", "stop"]).name, "stop")
+        child = parser.parse_args(["animate", "chase", "--daemon-child"])
+        self.assertTrue(child.daemon_child)
+        self.assertFalse(child.daemon)
 
     def test_decode_macro_frame_from_capture(self):
         from fizzctl.capture import load_tshark_json, significant

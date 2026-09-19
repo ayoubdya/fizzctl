@@ -119,6 +119,14 @@ def run_animation(dev, anim: str, color: tuple[int, int, int],
         pass
 
 
+def _sigterm(_signum, _frame):
+    """SIGTERM (from `animate stop`) -> KeyboardInterrupt so the streaming
+    loop unwinds cleanly and dev.close()/pidfile cleanup run.  The signal is
+    only delivered once the in-flight SET_REPORT completes, so the device is
+    never left mid-transfer."""
+    raise KeyboardInterrupt
+
+
 def cmd_animate(args):
     """fizzctl animate <name> [--color HEX] [--speed N] [--fps N] [--duration S] [--daemon]"""
     if args.name == "stop":
@@ -147,6 +155,7 @@ def cmd_animate(args):
         return 1
     if dev is None:
         return 1
+    signal.signal(signal.SIGTERM, _sigterm)
     try:
         print(f"streaming {anim} at {args.fps}fps (Ctrl+C to stop)...")
         run_animation(dev, anim, color, fps=args.fps, speed=args.speed, duration=args.duration)

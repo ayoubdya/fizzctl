@@ -379,6 +379,30 @@ class RegressionTests(unittest.TestCase):
         child = parser.parse_args(["animate", "chase", "--daemon-child"])
         self.assertTrue(child.daemon_child)
         self.assertFalse(child.daemon)
+        short = parser.parse_args(["animate", "-d", "-t", "5", "rainbow"])
+        self.assertTrue(short.daemon)
+        self.assertEqual(short.duration, 5)
+
+    def test_version_flag_reads_pyproject(self):
+        import contextlib
+        import io
+        from pathlib import Path
+
+        from fizzctl import version as pkg_version
+
+        expected = None
+        for line in Path("pyproject.toml").read_text().splitlines():
+            key, _, value = line.strip().partition("=")
+            if key.strip() == "version":
+                expected = value.strip().strip('"')
+        self.assertEqual(pkg_version(), expected)
+
+        buf = io.StringIO()
+        parser = cli._build_parser(False)
+        with self.assertRaises(SystemExit) as cm, contextlib.redirect_stdout(buf):
+            parser.parse_args(["--version"])
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn(f"fizzctl {expected}", buf.getvalue())
 
     def test_decode_macro_frame_from_capture(self):
         from fizzctl.capture import load_tshark_json, significant

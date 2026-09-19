@@ -146,11 +146,11 @@ def cmd_animate(args):
     if color is None:
         print(f"bad color {args.color!r}")
         return 1
-    if getattr(args, "daemon", False) and not getattr(args, "daemon_child", False):
+    if args.daemon and not args.daemon_child:
         return _animate_daemon(args, anim, color)
     from .hid import NoDeviceError, open_device
     try:
-        dev = open_device(debug=getattr(args, 'debug', False))
+        dev = open_device(debug=args.debug)
     except NoDeviceError:
         return 1
     if dev is None:
@@ -161,7 +161,7 @@ def cmd_animate(args):
         run_animation(dev, anim, color, fps=args.fps, speed=args.speed, duration=args.duration)
     finally:
         dev.close()
-        if getattr(args, "daemon_child", False):
+        if args.daemon_child:
             try:
                 os.unlink(_pidfile())
             except OSError:
@@ -176,7 +176,7 @@ def _pidfile() -> str:
 
 def _alive(pid: int) -> bool:
     """True only if pid is a plausible live pid (bounds guard the SIGTERM path)."""
-    if not 1 <= pid <= 4194304:                 # linux pid_max default
+    if not 1 <= pid <= 4194304:                 # ponytail: pid_max default 2^22
         return False
     try:
         os.kill(pid, 0)
@@ -207,7 +207,7 @@ def _animate_daemon(args, anim, color):
         return 1
 
     cmd = [sys.executable, "-m", "fizzctl"]
-    if getattr(args, "debug", False):
+    if args.debug:
         cmd.append("--debug")
     cmd += ["animate", anim, "--daemon-child", "--color", args.color,
             "--speed", str(args.speed), "--fps", str(args.fps)]

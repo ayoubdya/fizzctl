@@ -558,6 +558,8 @@ def cmd_paint(args):
 
 
 def _build_parser(dev: bool) -> argparse.ArgumentParser:
+    from . import version as _version
+
     p = argparse.ArgumentParser(
         prog="fizzctl" if not dev else "fizzctl-dev",
         description="Redragon K617 Fizz controller"
@@ -565,6 +567,7 @@ def _build_parser(dev: bool) -> argparse.ArgumentParser:
         else "Redragon K617 reverse-engineering toolkit (dev)",
     )
     p.add_argument("--debug", action="store_true", help="verbose frame-level logging")
+    p.add_argument("--version", "-V", action="version", version=f"%(prog)s {_version()}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     if dev:
@@ -649,8 +652,8 @@ Examples:
     pa.add_argument("-c", "--color", default="ff0000", help="base color (name or hex)")
     pa.add_argument("-s", "--speed", type=float, default=1.0, help="animation speed multiplier")
     pa.add_argument("-f", "--fps", type=int, default=30, help="frames per second")
-    pa.add_argument("--duration", type=float, help="stop after N seconds (default: until Ctrl+C)")
-    pa.add_argument("--daemon", action="store_true",
+    pa.add_argument("-t", "--duration", type=float, help="stop after N seconds (default: until Ctrl+C)")
+    pa.add_argument("-d", "--daemon", action="store_true",
                     help="run in a background daemon and free the terminal")
     pa.add_argument("--daemon-child", action="store_true",
                     help=argparse.SUPPRESS)
